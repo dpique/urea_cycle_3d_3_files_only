@@ -175,7 +175,7 @@ const cytosolStates = [
     QUEST_STATE.STEP_10_RIVER_CHALLENGE
 ];
 let inventory = {}; let currentQuest = null;
-let hasPortalPermission = false; // Flag for portal access
+let hasPortalPermission = false; // Flag for portal access 
 
 const ureaCycleQuest = {
     id: 'ureaCycle', name: "Ammonia Annihilation", state: QUEST_STATE.NOT_STARTED,
