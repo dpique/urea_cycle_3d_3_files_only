@@ -189,7 +189,7 @@ const ureaCycleQuest = {
         [QUEST_STATE.STEP_6_GATHER_CYTO]: "In the Cytosol: Collect the transported Citrulline, plus Aspartate (1) and ATP (1).",
         [QUEST_STATE.STEP_7_MAKE_ARGSUCC]: "Use ASS Station to make Argininosuccinate.",
         [QUEST_STATE.STEP_8_CLEAVE_ARGSUCC]: "Use ASL Station to cleave Argininosuccinate into Arginine and Fumarate. Collect both.", // Updated objective
-        [QUEST_STATE.STEP_8B_FURNACE_FUMARATE]: "Collect the arginine and fumarate, and feed the fumarate to the Krebs Cycle Furnace.", // <-- NEW OBJECTIVE
+        [QUEST_STATE.STEP_8B_FURNACE_FUMARATE]: "Gather the Arginine and Fumarate. Then, feed the Fumarate to the Krebs Cycle Furnace.", // <-- NEW OBJECTIVE
         [QUEST_STATE.STEP_9_MAKE_UREA]: "Use ARG1 Station with Arginine to make Urea and Ornithine.", // Adjusted for clarity
         [QUEST_STATE.STEP_9B_DISPOSE_UREA]: "Dispose of the toxic Urea in the Waste Receptacle.",
         [QUEST_STATE.STEP_10_RIVER_CHALLENGE]: "Return to Professor Hepaticus and pass the Reality River challenge.",
