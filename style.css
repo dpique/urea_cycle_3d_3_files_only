@@ -1,0 +1,177 @@
+body {
+    margin: 0;
+    overflow: hidden; /* Prevent scrollbars */
+    font-family: sans-serif;
+    background-color: #222;
+    color: #eee;
+}
+
+#game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+#gameCanvas {
+    display: block; /* Remove extra space below canvas */
+    width: 100%;
+    height: 100%;
+}
+
+#ui-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Allow clicks to pass through to canvas by default */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between; /* Push bottom elements down */
+    align-items: center; /* Center align horizontally by default */
+}
+
+/* Grouping for top-left elements */
+#ui-container > div:first-child {
+    align-self: flex-start;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start; /* Align items in this group left */
+}
+
+/* Grouping for centered elements */
+#ui-container > div:nth-child(2) {
+    width: 100%; /* Allow centering within this container */
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center panels like dialogue, river, prompt */
+}
+
+
+.ui-panel {
+    background-color: rgba(0, 0, 0, 0.7);
+    border: 1px solid #555;
+    border-radius: 5px;
+    padding: 10px;
+    margin: 10px;
+    pointer-events: auto; /* Panels themselves are clickable */
+    max-width: 300px; /* Limit width */
+    box-sizing: border-box; /* Include padding/border in width */
+}
+
+.hidden {
+    display: none !important; /* Force hide */
+}
+
+/* Dialogue Box Specifics */
+#dialogueBox {
+    /* position: absolute; No longer needed with flexbox centering */
+    /* bottom: 20px; */
+    /* left: 50%; */
+    /* transform: translateX(-50%); */
+    width: 60%;
+    max-width: 600px;
+    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    order: 2; /* Ensure it's below interaction prompt if both visible */
+}
+#dialogueText {
+    margin-bottom: 15px;
+}
+#dialogueOptions button {
+    margin: 0 5px;
+    padding: 8px 15px;
+    cursor: pointer;
+}
+
+/* Inventory Specifics */
+#inventoryDisplay {
+    /* align-self: flex-start; Handled by parent div */
+    min-width: 150px;
+}
+#inventoryList {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+#inventoryList li {
+    margin-bottom: 5px;
+}
+
+/* Quest Log Specifics */
+#questLog {
+     /* align-self: flex-start; Handled by parent div */
+     margin-top: 0; /* Remove extra margin */
+     min-width: 200px;
+}
+#questName { font-weight: bold; }
+
+
+/* Reality River Specifics */
+#realityRiver {
+    /* position: absolute; No longer needed */
+    /* top: 50%; */
+    /* left: 50%; */
+    /* transform: translate(-50%, -50%); */
+    width: 80%;
+    max-width: 500px;
+    text-align: center;
+}
+#riverVisual {
+    background-color: #335;
+    padding: 10px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+}
+#riverAnswers button {
+    display: block;
+    width: 90%;
+    margin: 8px auto;
+    padding: 10px;
+    cursor: pointer;
+    background-color: #447;
+    border: 1px solid #669;
+    color: #fff;
+    border-radius: 4px;
+}
+#riverAnswers button:hover {
+    background-color: #558;
+}
+#riverFeedback {
+    margin-top: 10px;
+    font-style: italic;
+    min-height: 1.2em; /* Prevent layout shift */
+}
+
+/* --- Interaction Prompt Styles --- */
+#interactionPrompt {
+    padding: 8px 15px;
+    font-size: 0.9em;
+    text-align: center;
+    max-width: 400px; /* Adjust as needed */
+    order: 1; /* Ensure it's above dialogue if both visible */
+}
+#interactionText {
+    font-weight: bold;
+    color: #ffffaa; /* Highlight the object name */
+}
+/* --- End Interaction Prompt Styles --- */
+
+
+/* Loading Screen */
+#loadingScreen {
+    position: absolute; /* Needs to overlay everything */
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 2em;
+    z-index: 100; /* Ensure it's on top */
+    pointer-events: auto; /* Allow interaction if needed later */
+}

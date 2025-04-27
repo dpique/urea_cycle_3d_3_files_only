@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metabolon RPG</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Canvas for Three.js rendering -->
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <!-- UI Overlays -->
+    <div id="ui-container">
+        <!-- Top Left Panels -->
+        <div>
+            <!-- Inventory Display -->
+            <div id="inventoryDisplay" class="ui-panel">
+                <h3>Inventory</h3>
+                <ul id="inventoryList">
+                    <!-- Items will be listed here -->
+                </ul>
+            </div>
+
+            <!-- Quest Log (Simplified) -->
+            <div id="questLog" class="ui-panel">
+                <h3>Quest: <span id="questName">None</span></h3>
+                <p>Objective: <span id="questObjective"></span></p>
+            </div>
+        </div>
+
+
+        <!-- Centered Panels -->
+        <div>
+             <!-- Reality River Mini-Game -->
+             <div id="realityRiver" class="ui-panel hidden">
+                <h2>Reality River of Recall</h2>
+                <div id="riverVisual"> <!-- Basic representation -->
+                    <span>START</span> ----- <span id="riverProgress"></span> ----- <span>END</span>
+                </div>
+                <p id="riverQuestion">Question text...</p>
+                <div id="riverAnswers">
+                    <!-- Answer buttons will be added here -->
+                </div>
+                <p id="riverFeedback"></p>
+            </div>
+
+            <!-- Interaction Prompt - ADDED -->
+            <div id="interactionPrompt" class="ui-panel hidden">
+                 [E] Interact with <span id="interactionText">Object</span>
+            </div>
+
+             <!-- Dialogue Box -->
+            <div id="dialogueBox" class="ui-panel hidden">
+                <p id="dialogueText">Dialogue goes here...</p>
+                <div id="dialogueOptions">
+                    <!-- Buttons will be added here dynamically -->
+                </div>
+            </div>
+        </div>
+
+
+         <!-- Loading Indicator -->
+         <div id="loadingScreen" class="ui-panel">Loading...</div>
+
+    </div> <!-- End ui-container -->
+
+    <!-- Import Three.js (using ES Modules from CDN) -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <!-- Your Game Logic -->
+    <script type="module" src="main.js"></script>
+</body>
+</html>
