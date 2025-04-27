@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Box3, Vector3 } from 'three'; // Explicitly import
+import { Box3, Vector3, Shape, ExtrudeGeometry } from 'three'; // Explicitly import Shape, ExtrudeGeometry
 
 // --- DOM Element References ---
 const gameContainer = document.getElementById('game-container');
@@ -27,7 +27,6 @@ scene.background = new THREE.Color(0x33334d);
 
 // --- Camera Setup ---
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-// Camera starting position is less relevant now, will be positioned relative to player
 
 // --- Renderer Setup ---
 const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -56,12 +55,10 @@ mitochondriaZone.receiveShadow = true; scene.add(mitochondriaZone);
 
 // --- OrbitControls (Used mainly for damping/smoothing, user input disabled) ---
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; controls.dampingFactor = 0.1; // Adjust for desired smoothness
+controls.enableDamping = true; controls.dampingFactor = 0.1;
 controls.screenSpacePanning = false;
-controls.enableRotate = false; // Disable user orbiting
-controls.enableZoom = false;   // Disable user zoom
-controls.enablePan = false;    // Disable user panning
-let isUserInteracting = false; // Still useful to pause lerping during dialogues etc.
+controls.enableRotate = false; controls.enableZoom = false; controls.enablePan = false;
+let isUserInteracting = false;
 
 // --- Interaction/Tracking Arrays and Map ---
 let interactiveObjects = [];
@@ -70,7 +67,8 @@ let collidableWalls = [];
 const wallBoundingBoxes = [];
 const originalMaterials = new Map();
 const playerBoundingBox = new THREE.Box3();
-let portalBarrier = null; // Reference to the visual barrier mesh
+let portalBarrier = null;
+let activeAnimations = []; // For animating things like Fumarate
 
 // --- Player Setup ---
 const playerSpeed = 5.0;
@@ -97,7 +95,6 @@ const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.15; player.add(rightLe
 const playerHeight = legHeight + bodyHeight + headHeight;
 
 const keysPressed = {};
-const playerTargetY = legHeight + bodyHeight / 2; // Used for lookAt offset
 
 // --- Maze Walls & Collision ---
 const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.2, roughness: 0.9 });
@@ -144,20 +141,9 @@ if (wall2Length > 0.1) { createWall({ x: portalWallX, y: wallHeight / 2, z: wall
 const cabinetMaterial = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.8 });
 const cabinetGeometry = new THREE.BoxGeometry(1, 1.5, 1.5);
 const cabinet = new THREE.Mesh(cabinetGeometry, cabinetMaterial);
-cabinet.position.set(-14.5, 0.75, -1); // Position next to wall
-cabinet.castShadow = true;
-cabinet.receiveShadow = true;
-scene.add(cabinet);
-
-const cabinetLabel = createTextSprite("Kitchen Cabinet",
-    { x: cabinet.position.x, y: cabinet.position.y + 1.2, z: cabinet.position.z },
-    { fontSize: 24, scale: 1 }
-);
-scene.add(cabinetLabel);
-
-// Move HCO3 to be on top of the cabinet
-createResource('HCO3', { x: cabinet.position.x, z: cabinet.position.z }, 0xaaaaff,
-    { initialY: cabinet.position.y + (cabinetGeometry.parameters.height / 2) + 0.3 });
+cabinet.position.set(-14.5, 0.75, -1); scene.add(cabinet); cabinet.castShadow = true; cabinet.receiveShadow = true;
+const cabinetLabel = createTextSprite("Kitchen Cabinet", { x: cabinet.position.x, y: cabinet.position.y + 1.2, z: cabinet.position.z }, { fontSize: 24, scale: 1 }); scene.add(cabinetLabel);
+createResource('HCO3', { x: cabinet.position.x, z: cabinet.position.z }, 0xaaaaff, { initialY: cabinet.position.y + (cabinetGeometry.parameters.height / 2) + 0.3 });
 
 // --- Interaction Setup ---
 const interactionRadius = 2.0;
@@ -165,33 +151,14 @@ let closestInteractiveObject = null;
 let lastClosestObject = null;
 const highlightMaterial = new THREE.MeshStandardMaterial({ emissive: 0xffff00, emissiveIntensity: 0.6 });
 
-
 // --- Game State & Quest Data ---
 const QUEST_STATE = {
-    NOT_STARTED: 'NOT_STARTED',
-    STEP_1_GATHER_MITO: 'STEP_1_GATHER_MITO',
-    STEP_2_MAKE_CARB_PHOS: 'STEP_2_MAKE_CARB_PHOS',
-    STEP_3_MEET_USHER: 'STEP_3_MEET_USHER',  // New state
-    STEP_4_MAKE_CITRULLINE: 'STEP_4_MAKE_CITRULLINE',
-    STEP_5_TRANSPORT_CIT: 'STEP_5_TRANSPORT_CIT',
-    STEP_6_GATHER_CYTO: 'STEP_6_GATHER_CYTO',
-    STEP_7_MAKE_ARGSUCC: 'STEP_7_MAKE_ARGSUCC',
-    STEP_8_CLEAVE_ARGSUCC: 'STEP_8_CLEAVE_ARGSUCC',
-    STEP_9_MAKE_UREA: 'STEP_9_MAKE_UREA',
-    STEP_10_RIVER_CHALLENGE: 'STEP_10_RIVER_CHALLENGE',
-    COMPLETED: 'COMPLETED'
+    NOT_STARTED: 'NOT_STARTED', STEP_1_GATHER_MITO: 'STEP_1_GATHER_MITO', STEP_2_MAKE_CARB_PHOS: 'STEP_2_MAKE_CARB_PHOS', STEP_3_MEET_USHER: 'STEP_3_MEET_USHER', STEP_4_MAKE_CITRULLINE: 'STEP_4_MAKE_CITRULLINE', STEP_5A_OPEN_PORTAL: 'STEP_5A_OPEN_PORTAL', STEP_6_GATHER_CYTO: 'STEP_6_GATHER_CYTO', STEP_7_MAKE_ARGSUCC: 'STEP_7_MAKE_ARGSUCC', STEP_8_CLEAVE_ARGSUCC: 'STEP_8_CLEAVE_ARGSUCC', STEP_9_MAKE_UREA: 'STEP_9_MAKE_UREA', STEP_9B_DISPOSE_UREA: 'STEP_9B_DISPOSE_UREA', STEP_10_RIVER_CHALLENGE: 'STEP_10_RIVER_CHALLENGE', COMPLETED: 'COMPLETED'
 };
-
-// Define cytosol states at a higher scope
-const cytosolStates = [
-    QUEST_STATE.STEP_6_GATHER_CYTO,
-    QUEST_STATE.STEP_7_MAKE_ARGSUCC,
-    QUEST_STATE.STEP_8_CLEAVE_ARGSUCC,
-    QUEST_STATE.STEP_9_MAKE_UREA,
-    QUEST_STATE.STEP_10_RIVER_CHALLENGE
-];
-
+const cytosolStates = [ QUEST_STATE.STEP_6_GATHER_CYTO, QUEST_STATE.STEP_7_MAKE_ARGSUCC, QUEST_STATE.STEP_8_CLEAVE_ARGSUCC, QUEST_STATE.STEP_9_MAKE_UREA, QUEST_STATE.STEP_9B_DISPOSE_UREA, QUEST_STATE.STEP_10_RIVER_CHALLENGE ];
 let inventory = {}; let currentQuest = null;
+let hasPortalPermission = false; // Flag for portal access
+
 const ureaCycleQuest = {
     id: 'ureaCycle', name: "Ammonia Annihilation", state: QUEST_STATE.NOT_STARTED,
     objectives: {
@@ -199,438 +166,147 @@ const ureaCycleQuest = {
         [QUEST_STATE.STEP_1_GATHER_MITO]: "First, gather NH3 (1), HCO3 (1), ATP (2) in Mitochondria.",
         [QUEST_STATE.STEP_2_MAKE_CARB_PHOS]: "Great! Now use the CPS1 Station to make Carbamoyl Phosphate.",
         [QUEST_STATE.STEP_3_MEET_USHER]: "Find the Ornithine Usher to get some Ornithine.",
-        [QUEST_STATE.STEP_4_MAKE_CITRULLINE]: "Use OTC Station with Carbamoyl Phosphate and Ornithine to make Citrulline.",
-        [QUEST_STATE.STEP_5_TRANSPORT_CIT]: "Talk to Ornithine Usher again to open the portal, then use it to transport Citrulline.",
-        [QUEST_STATE.STEP_6_GATHER_CYTO]: "In the Cytosol: Collect transported Citrulline, gather Aspartate (1), ATP (1).",
+        [QUEST_STATE.STEP_4_MAKE_CITRULLINE]: "Use OTC Station with Carbamoyl Phosphate and Ornithine to make Citrulline, then talk to the Ornithine Usher to gain passage.",
+        [QUEST_STATE.STEP_5A_OPEN_PORTAL]: "Permission granted! Use the ORN T1 Portal with Citrulline to activate it and transport to the Cytosol.",
+        [QUEST_STATE.STEP_6_GATHER_CYTO]: "In the Cytosol: Collect the transported Citrulline, plus Aspartate (1) and ATP (1).",
         [QUEST_STATE.STEP_7_MAKE_ARGSUCC]: "Use ASS Station to make Argininosuccinate.",
-        [QUEST_STATE.STEP_8_CLEAVE_ARGSUCC]: "Use ASL Station to cleave Argininosuccinate into Arginine.",
-        [QUEST_STATE.STEP_9_MAKE_UREA]: "Final step: Use ARG1 Station to convert Arginine to Urea.",
+        [QUEST_STATE.STEP_8_CLEAVE_ARGSUCC]: "Use ASL Station to cleave Argininosuccinate into Arginine (Fumarate will go to the Krebs Cycle).", // Updated objective text
+        [QUEST_STATE.STEP_9_MAKE_UREA]: "Final reaction: Use ARG1 Station to convert Arginine to Urea.",
+        [QUEST_STATE.STEP_9B_DISPOSE_UREA]: "Dispose of the toxic Urea in the Waste Receptacle.",
         [QUEST_STATE.STEP_10_RIVER_CHALLENGE]: "Return to Professor Hepaticus and pass the Reality River challenge.",
         [QUEST_STATE.COMPLETED]: "Quest complete! You've mastered the Urea Cycle!"
     }, rewards: { knowledgePoints: 100 }
 };
-
-const ureaRiverQuestions = [ { q: "Where in the cell does the Urea Cycle BEGIN?", a: ["Cytosol", "Mitochondria", "Nucleus", "ER"], correct: 1 }, { q: "Which enzyme combines NH3, HCO3, and ATP?", a: ["OTC", "CPS1", "ASS", "Arginase"], correct: 1 }, { q: "Which molecule carries the second nitrogen into the cycle (in the cytosol)?", a: ["Glutamate", "Ornithine", "Aspartate", "Citrulline"], correct: 2 }, { q: "Which molecule is transported OUT of the mitochondria during the cycle?", a: ["Ornithine", "Carbamoyl Phosphate", "Citrulline", "Urea"], correct: 2 }, { q: "What toxic molecule is the primary input for the cycle?", a: ["Urea", "Ammonia (NH3/NH4+)", "Fumarate", "ATP"], correct: 1 }, { q: "What molecule is REGENERATED at the end of the cycle in the cytosol?", a: ["Arginine", "Ornithine", "Aspartate", "Urea"], correct: 1 } ];
+const ureaRiverQuestions = [ { q: "Where does the Urea Cycle BEGIN?", a: ["Cytosol", "Mitochondria", "Nucleus", "ER"], correct: 1 }, { q: "Which enzyme combines NH3, HCO3, and ATP?", a: ["OTC", "CPS1", "ASS", "Arginase"], correct: 1 }, { q: "Which molecule carries N into the cycle in cytosol?", a: ["Glutamate", "Ornithine", "Aspartate", "Citrulline"], correct: 2 }, { q: "Which molecule is transported OUT of mitochondria?", a: ["Ornithine", "Carbamoyl Phosphate", "Citrulline", "Urea"], correct: 2 }, { q: "What toxic molecule is the primary input?", a: ["Urea", "Ammonia (NH3/NH4+)", "Fumarate", "ATP"], correct: 1 }, { q: "What molecule is REGENERATED in cytosol?", a: ["Arginine", "Ornithine", "Aspartate", "Urea"], correct: 1 } ];
 let currentRiverQuestionIndex = 0; let riverCorrectAnswers = 0;
-
 
 // --- Text Sprite Function ---
 function createTextSprite(text, position, parameters = {}) {
-    const fontFace = parameters.fontFace || "Arial";
-    const fontSize = parameters.fontSize || 48; // px
-    const scaleFactor = parameters.scale || 2;
-    const color = parameters.textColor || "rgba(255, 255, 255, 0.95)";
-
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    context.font = "Bold " + fontSize + "px " + fontFace;
-    const metrics = context.measureText(text);
-    const textWidth = metrics.width;
-    const padding = fontSize * 0.2;
-    canvas.width = textWidth + padding * 2;
-    canvas.height = fontSize + padding * 2;
-
-    context.font = "Bold " + fontSize + "px " + fontFace; // Re-apply after resize
-    context.fillStyle = color;
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(text, canvas.width / 2, canvas.height / 2);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-
-    const spriteMaterial = new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-        depthTest: false, // Render on top
-        depthWrite: false,
-    });
-
-    const sprite = new THREE.Sprite(spriteMaterial);
-    const aspect = canvas.width / canvas.height;
-    sprite.scale.set(scaleFactor * aspect, scaleFactor, 1);
-    sprite.position.set(position.x, position.y, position.z);
-    return sprite;
+    const fontFace = parameters.fontFace || "Arial"; const fontSize = parameters.fontSize || 48; const scaleFactor = parameters.scale || 2; const color = parameters.textColor || "rgba(255, 255, 255, 0.95)";
+    const canvas = document.createElement('canvas'); const context = canvas.getContext('2d'); context.font = "Bold " + fontSize + "px " + fontFace;
+    const metrics = context.measureText(text); const textWidth = metrics.width; const padding = fontSize * 0.2; canvas.width = textWidth + padding * 2; canvas.height = fontSize + padding * 2;
+    context.font = "Bold " + fontSize + "px " + fontFace; context.fillStyle = color; context.textAlign = "center"; context.textBaseline = "middle"; context.fillText(text, canvas.width / 2, canvas.height / 2);
+    const texture = new THREE.CanvasTexture(canvas); texture.needsUpdate = true; const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
+    const sprite = new THREE.Sprite(spriteMaterial); const aspect = canvas.width / canvas.height; sprite.scale.set(scaleFactor * aspect, scaleFactor, 1); sprite.position.set(position.x, position.y, position.z); return sprite;
 }
-
 
 // --- Game Object Creation Functions ---
 function createLightningBoltGeometry() {
-    const points = [
-        new THREE.Vector3(0, 0.8, 0),      // Top
-        new THREE.Vector3(-0.4, 0.4, 0.2),   // Left point upper
-        new THREE.Vector3(0, 0.2, -0.2),    // Middle upper
-        new THREE.Vector3(0.4, 0, 0.2),    // Right point
-        new THREE.Vector3(0, -0.2, -0.2),   // Middle lower
-        new THREE.Vector3(-0.4, -0.4, 0.2),  // Left point lower
-        new THREE.Vector3(0, -0.8, 0)      // Bottom
-    ];
-
-    const geometry = new THREE.BufferGeometry();
-    const vertices = [];
-    const thickness = 0.15; // Increased thickness
-
-    // Create triangles for each segment with varying depth
-    for (let i = 0; i < points.length - 1; i++) {
-        const p1 = points[i];
-        const p2 = points[i + 1];
-        const direction = new THREE.Vector3().subVectors(p2, p1).normalize();
-        const perpendicular = new THREE.Vector3(-direction.y, direction.x, 0).multiplyScalar(thickness);
-
-        // Front face triangles
-        vertices.push(
-            p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z + thickness,
-            p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z + thickness,
-            p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z + thickness
-        );
-        vertices.push(
-            p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z + thickness,
-            p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z + thickness,
-            p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z + thickness
-        );
-
-        // Back face triangles
-        vertices.push(
-            p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z - thickness,
-            p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z - thickness,
-            p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z - thickness
-        );
-        vertices.push(
-            p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z - thickness,
-            p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z - thickness,
-            p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z - thickness
-        );
-
-        // Side triangles
-        vertices.push(
-            p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z + thickness,
-            p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z + thickness,
-            p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z - thickness
-        );
-        vertices.push(
-            p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z + thickness,
-            p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z - thickness,
-            p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z - thickness
-        );
-         // Add the other side face
-         vertices.push(
-             p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z + thickness,
-             p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z - thickness,
-             p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z + thickness
-         );
-         vertices.push(
-             p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z - thickness,
-             p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z - thickness,
-             p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z + thickness
-         );
-    }
-
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.computeVertexNormals();
-    return geometry;
+    const points = [ new THREE.Vector3(0, 0.8, 0), new THREE.Vector3(-0.4, 0.4, 0.2), new THREE.Vector3(0, 0.2, -0.2), new THREE.Vector3(0.4, 0, 0.2), new THREE.Vector3(0, -0.2, -0.2), new THREE.Vector3(-0.4, -0.4, 0.2), new THREE.Vector3(0, -0.8, 0) ];
+    const geometry = new THREE.BufferGeometry(); const vertices = []; const thickness = 0.15;
+    for (let i = 0; i < points.length - 1; i++) { const p1 = points[i]; const p2 = points[i + 1]; const direction = new THREE.Vector3().subVectors(p2, p1).normalize(); const perpendicular = new THREE.Vector3(-direction.y, direction.x, 0).multiplyScalar(thickness); vertices.push( p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z + thickness, p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z + thickness, p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z + thickness ); vertices.push( p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z + thickness, p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z + thickness, p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z + thickness ); vertices.push( p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z - thickness, p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z - thickness, p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z - thickness ); vertices.push( p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z - thickness, p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z - thickness, p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z - thickness ); vertices.push( p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z + thickness, p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z + thickness, p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z - thickness ); vertices.push( p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z + thickness, p2.x + perpendicular.x, p2.y + perpendicular.y, p2.z - thickness, p1.x + perpendicular.x, p1.y + perpendicular.y, p1.z - thickness ); vertices.push( p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z + thickness, p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z - thickness, p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z + thickness ); vertices.push( p1.x - perpendicular.x, p1.y - perpendicular.y, p1.z - thickness, p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z - thickness, p2.x - perpendicular.x, p2.y - perpendicular.y, p2.z + thickness ); }
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3)); geometry.computeVertexNormals(); return geometry;
 }
-
 function createStation(name, position, color, userData) {
-    const geometry = new THREE.BoxGeometry(1, 2, 1);
-    const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.7 });
-    const station = new THREE.Mesh(geometry, material);
-    station.position.set(position.x, 1, position.z);
-    station.castShadow = true; station.receiveShadow = true;
-    station.userData = { type: 'station', name: name, ...userData };
-    scene.add(station);
-    interactiveObjects.push(station);
-    originalMaterials.set(station, material.clone()); // Store a clone
-    const label = createTextSprite(name, { x: position.x, y: 2.5, z: position.z }, { fontSize: 36, scale: 1.5 });
-    scene.add(label); return station;
+    const geometry = new THREE.BoxGeometry(1, 2, 1); const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.7 }); const station = new THREE.Mesh(geometry, material); station.position.set(position.x, 1, position.z); station.castShadow = true; station.receiveShadow = true; station.userData = { type: 'station', name: name, ...userData }; scene.add(station); interactiveObjects.push(station); originalMaterials.set(station, material.clone()); const label = createTextSprite(name, { x: position.x, y: 2.5, z: position.z }, { fontSize: 36, scale: 1.5 }); scene.add(label); return station;
 }
 function createResource(name, position, color, userData = {}) {
-    try {
-        let geometry;
-        let material;
-        let scale = 1.0; // Default scale
-
-        if (name === 'ATP') {
-            geometry = createLightningBoltGeometry();
-            material = new THREE.MeshStandardMaterial({
-                color: color,
-                roughness: 0.3,
-                metalness: 0.7,
-                emissive: color,
-                emissiveIntensity: 0.3
-            });
-            // ATP already has its own geometry size, scale might not be needed or adjusted differently
-        } else {
-             // *** ADDED *** Define standard sphere geometry for reuse
-            geometry = new THREE.SphereGeometry(0.3, 12, 10); // Standard size for molecules
-
-            // *** ADDED *** Custom shapes/colors for specific molecules
-            if (name === 'Carbamoyl Phosphate') {
-                 // Maybe slightly different color or shape? Using sphere for now.
-                 color = 0xff3333; // Distinct reddish
-            } else if (name === 'Citrulline') {
-                color = 0xff8c00; // Keep orange
-            } else if (name === 'Argininosuccinate') {
-                color = 0x33ff33; // Distinct greenish
-                 geometry = new THREE.IcosahedronGeometry(0.35, 0); // Slightly different shape
-                 scale = 1.1;
-            } else if (name === 'Arginine') {
-                color = 0x6666ff; // Distinct blueish
-                 geometry = new THREE.CapsuleGeometry(0.2, 0.3, 4, 8); // Capsule shape
-                 scale = 1.0;
-            } else if (name === 'Urea') {
-                 color = 0xdddddd; // Whitish/Grey
-                 geometry = new THREE.TorusKnotGeometry(0.2, 0.08, 50, 8); // Knot shape
-                 scale = 1.2;
-            } else if (name === 'Ornithine') {
-                color = 0xaaccaa; // Keep greenish
-            } else if (name === 'Fumarate') { // Although we don't spawn Fumarate, define for consistency
-                color = 0xcccccc;
-            }
-            // Use standard sphere if not specified above
-
-            material = new THREE.MeshStandardMaterial({
-                color: color,
-                roughness: 0.5,
-                metalness: 0.1
-            });
-        }
-
-        const resource = new THREE.Mesh(geometry, material);
-        if (isNaN(position.x) || isNaN(position.z)) {
-            console.error(`Invalid position for resource ${name}`);
-            position = { x: 0, z: 0 };
-        }
-
-        const initialY = userData.initialY !== undefined ? userData.initialY : 0.6;
-        resource.userData = { ...userData, type: 'resource', name: name, object3D: resource, initialY: initialY };
-        resource.position.set(position.x, initialY, position.z);
-        resource.scale.set(scale, scale, scale); // Apply scale
-        resource.castShadow = true;
-
-        // Add random rotation for non-spheres/ATP
-        if (name !== 'ATP' && !(geometry instanceof THREE.SphereGeometry)) {
-             resource.rotation.x = Math.random() * Math.PI;
-             resource.rotation.y = Math.random() * Math.PI * 2;
-        } else if (name === 'ATP') {
-            resource.rotation.y = Math.random() * Math.PI * 2;
-        }
-
-
-        scene.add(resource);
-        interactiveObjects.push(resource);
-        resourceMeshes.push(resource);
-        originalMaterials.set(resource, material.clone());
-        return resource;
-    } catch (error) {
-        console.error(`Error creating resource ${name}:`, error);
-        return null;
-    }
+    try { let geometry; let material; let scale = 1.0;
+        if (name === 'ATP') { geometry = createLightningBoltGeometry(); material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3, metalness: 0.7, emissive: color, emissiveIntensity: 0.3 }); }
+        else { geometry = new THREE.SphereGeometry(0.3, 12, 10); if (name === 'Carbamoyl Phosphate') { color = 0xff3333; } else if (name === 'Citrulline') { color = 0xff8c00; } else if (name === 'Argininosuccinate') { color = 0x33ff33; geometry = new THREE.IcosahedronGeometry(0.35, 0); scale = 1.1; } else if (name === 'Arginine') { color = 0x6666ff; geometry = new THREE.CapsuleGeometry(0.2, 0.3, 4, 8); scale = 1.0; } else if (name === 'Urea') { color = 0xdddddd; geometry = new THREE.TorusKnotGeometry(0.2, 0.08, 50, 8); scale = 1.2; } else if (name === 'Ornithine') { color = 0xaaccaa; } else if (name === 'Fumarate') { color = 0xcccccc; geometry = new THREE.DodecahedronGeometry(0.3, 0); } material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.5, metalness: 0.1 }); } // Added Fumarate shape
+        const resource = new THREE.Mesh(geometry, material); if (isNaN(position.x) || isNaN(position.z)) { console.error(`Invalid pos for ${name}`); position = { x: 0, z: 0 }; } const initialY = userData.initialY !== undefined ? userData.initialY : 0.6; resource.userData = { ...userData, type: 'resource', name: name, object3D: resource, initialY: initialY }; resource.position.set(position.x, initialY, position.z); resource.scale.set(scale, scale, scale); resource.castShadow = true;
+        if (name !== 'ATP' && !(geometry instanceof THREE.SphereGeometry)) { resource.rotation.x = Math.random() * Math.PI; resource.rotation.y = Math.random() * Math.PI * 2; } else if (name === 'ATP') { resource.rotation.y = Math.random() * Math.PI * 2; }
+        scene.add(resource); interactiveObjects.push(resource); resourceMeshes.push(resource); originalMaterials.set(resource, material.clone()); return resource;
+    } catch (error) { console.error(`Error creating ${name}:`, error); return null; }
 }
-
 function createProfessorHepaticus(position) {
-    const professorGroup = new THREE.Group();
-    professorGroup.position.copy(position);
-
-    // Body
-    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xccaa00, roughness: 0.7 });
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.2, 8), bodyMaterial);
-    body.position.y = 0.6;
-    body.castShadow = true;
-    professorGroup.add(body);
-
-    // Head
-    const headMaterial = new THREE.MeshStandardMaterial({ color: 0xffcc99, roughness: 0.5 });
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), headMaterial);
-    head.position.y = 1.4; // Corrected Y position relative to group base
-    head.castShadow = true;
-    professorGroup.add(head);
-
-    // Lab Coat
-    const coatMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
-    const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 1.4, 8), coatMaterial);
-    coat.position.y = 0.7; // Corrected Y position
-    coat.castShadow = true;
-    professorGroup.add(coat);
-
-    // Arms
-    const armMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
-    const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8), armMaterial);
-    leftArm.position.set(-0.5, 0.8, 0); // Corrected Y position
-    leftArm.rotation.z = Math.PI / 6;
-    leftArm.castShadow = true;
-    professorGroup.add(leftArm);
-
-    const rightArm = leftArm.clone();
-    rightArm.position.x = 0.5;
-    rightArm.rotation.z = -Math.PI / 6;
-    professorGroup.add(rightArm);
-
-    // Glasses
-    const glassesMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.3 });
-    const leftLens = new THREE.Mesh(new THREE.CircleGeometry(0.1, 16), glassesMaterial);
-     leftLens.position.set(-0.1, 1.45, 0.25); // Y position matches head height, Z slightly forward
-     leftLens.rotation.x = 0; // Circle geometry lies on XY plane, no X rotation needed if facing Z
-     leftLens.rotation.y = 0; // Adjust if needed
-    professorGroup.add(leftLens);
-
-    const rightLens = leftLens.clone();
-    rightLens.position.x = 0.1;
-    professorGroup.add(rightLens);
-
-    // Add to scene and interactive objects
-    scene.add(professorGroup);
-    professorGroup.userData = { type: 'npc', name: 'Professor Hepaticus', questId: 'ureaCycle' };
-    interactiveObjects.push(professorGroup);
-    originalMaterials.set(professorGroup, coatMaterial.clone()); // Use coat material for highlight base
-
-    // Add name label
-    const label = createTextSprite("Professor Hepaticus",
-        { x: position.x, y: position.y + 2.0, z: position.z }, // Adjusted label height
-        { fontSize: 36, scale: 1.5 }
-    );
-    scene.add(label);
-
+    const professorGroup = new THREE.Group(); professorGroup.position.copy(position);
+    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xccaa00, roughness: 0.7 }); const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 1.2, 8), bodyMaterial); body.position.y = 0.6; body.castShadow = true; professorGroup.add(body);
+    const headMaterial = new THREE.MeshStandardMaterial({ color: 0xffcc99, roughness: 0.5 }); const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), headMaterial); head.position.y = 1.4; head.castShadow = true; professorGroup.add(head);
+    const coatMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }); const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 1.4, 8), coatMaterial); coat.position.y = 0.7; coat.castShadow = true; professorGroup.add(coat);
+    const armMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }); const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8), armMaterial); leftArm.position.set(-0.5, 0.8, 0); leftArm.rotation.z = Math.PI / 6; leftArm.castShadow = true; professorGroup.add(leftArm); const rightArm = leftArm.clone(); rightArm.position.x = 0.5; rightArm.rotation.z = -Math.PI / 6; professorGroup.add(rightArm);
+    const glassesMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.3 }); const leftLens = new THREE.Mesh(new THREE.CircleGeometry(0.1, 16), glassesMaterial); leftLens.position.set(-0.1, 1.45, 0.25); leftLens.rotation.x = 0; professorGroup.add(leftLens); const rightLens = leftLens.clone(); rightLens.position.x = 0.1; professorGroup.add(rightLens);
+    scene.add(professorGroup); professorGroup.userData = { type: 'npc', name: 'Professor Hepaticus', questId: 'ureaCycle' }; interactiveObjects.push(professorGroup); originalMaterials.set(professorGroup, coatMaterial.clone()); // Use coatMaterial for original highlight map
+    const label = createTextSprite("Professor Hepaticus", { x: position.x, y: position.y + 2.0, z: position.z }, { fontSize: 36, scale: 1.5 }); scene.add(label);
     return professorGroup;
 }
+function createWasteBucket(position) {
+    const bucketGroup = new THREE.Group(); bucketGroup.position.copy(position);
+    const kidneyShape = new THREE.Shape(); kidneyShape.moveTo(0, 0.6); kidneyShape.bezierCurveTo(0.5, 0.7, 0.7, 0.4, 0.6, 0); kidneyShape.bezierCurveTo(0.65, -0.5, 0.3, -0.7, 0, -0.6); kidneyShape.bezierCurveTo(-0.3, -0.7, -0.65, -0.5, -0.6, 0); kidneyShape.bezierCurveTo(-0.7, 0.4, -0.5, 0.7, 0, 0.6);
+    const extrudeSettings = { steps: 1, depth: 1.0, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelOffset: 0, bevelSegments: 3 };
+    const geometry = new THREE.ExtrudeGeometry(kidneyShape, extrudeSettings); geometry.center(); geometry.rotateX(Math.PI / 2);
+    const material = new THREE.MeshStandardMaterial({ color: 0x888899, metalness: 0.7, roughness: 0.4 });
+    const bucket = new THREE.Mesh(geometry, material); bucket.scale.set(0.8, 0.8, 0.8); bucket.castShadow = true; bucket.receiveShadow = true; bucketGroup.add(bucket);
+    scene.add(bucketGroup); bucketGroup.userData = { type: 'wasteBucket', name: 'Waste Receptacle' }; interactiveObjects.push(bucketGroup); originalMaterials.set(bucketGroup, material.clone()); // Use material for original highlight map
+    const label = createTextSprite("Waste Receptacle", { x: position.x, y: position.y + 1.2, z: position.z }, { fontSize: 30, scale: 1.2 }); scene.add(label);
+    return bucketGroup;
+}
+
+// --- Create Krebs Furnace Object ---
+function createKrebsFurnace(position) {
+    const furnaceGroup = new THREE.Group();
+    furnaceGroup.position.copy(position);
+
+    // Base
+    const baseMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9 });
+    const baseGeometry = new THREE.BoxGeometry(1.2, 1.5, 1.2);
+    const base = new THREE.Mesh(baseGeometry, baseMaterial);
+    base.position.y = 0.75;
+    base.castShadow = true;
+    base.receiveShadow = true;
+    furnaceGroup.add(base);
+
+    // Opening/Firebox
+    const fireMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff4500, // Orange-red
+        emissive: 0xdd3300,
+        emissiveIntensity: 0.8,
+        roughness: 0.6
+    });
+    const fireGeometry = new THREE.BoxGeometry(0.8, 0.6, 0.2);
+    const firebox = new THREE.Mesh(fireGeometry, fireMaterial);
+    firebox.position.set(0, 0.5, 0.51); // Positioned at the front face, slightly lower part
+    furnaceGroup.add(firebox);
+
+    // Chimney (Optional)
+    const chimneyGeometry = new THREE.CylinderGeometry(0.2, 0.15, 0.8);
+    const chimney = new THREE.Mesh(chimneyGeometry, baseMaterial);
+    chimney.position.y = 1.5 + 0.4; // On top of the base
+    furnaceGroup.add(chimney);
+
+    furnaceGroup.userData = { type: 'krebsFurnace', name: 'Krebs Cycle Furnace' };
+    scene.add(furnaceGroup);
+    // DO NOT add to interactiveObjects
+
+    const label = createTextSprite("Krebs Cycle Furnace", { x: position.x, y: position.y + 2.4, z: position.z }, { fontSize: 30, scale: 1.2 });
+    scene.add(label);
+
+    return furnaceGroup;
+}
+
 
 // --- Create Game World Entities ---
-// NPCs
-const professorHepaticus = createProfessorHepaticus(new THREE.Vector3(-4.5, 0, -1)); // Professor base at y=0
-
-const usherMaterial = new THREE.MeshStandardMaterial({ color: 0x8a2be2 }); // Purple
-// CapsuleGeometry: radius, height (excluding caps), capSegments, radialSegments
-const usherGeometry = new THREE.CapsuleGeometry(0.4, 1.0, 4, 8); // Adjust size
-const ornithineUsher = new THREE.Mesh(usherGeometry, usherMaterial);
-ornithineUsher.position.set(-4.5, 0.7, -4); // Y = height/2 + radius = 1.0/2 + 0.4 = 0.9 (or adjust base)
-ornithineUsher.castShadow = true;
-ornithineUsher.userData = { type: 'npc', name: 'Ornithine Usher' };
-scene.add(ornithineUsher);
-interactiveObjects.push(ornithineUsher);
-originalMaterials.set(ornithineUsher, usherMaterial.clone());
-const usherLabel = createTextSprite("Ornithine Usher", { x: -4.5, y: 2.2, z: -4 }, { fontSize: 36, scale: 1.5 }); // Adjusted label height
-scene.add(usherLabel);
-
-// Stations (Define product colors here if not done in createResource)
-const carbPhosColor = 0xff3333;
-const citrullineColor = 0xff8c00;
-const argSuccColor = 0x33ff33;
-const arginineColor = 0x6666ff;
-const ureaColor = 0xdddddd;
-const ornithineColor = 0xaaccaa;
-const fumarateColor = 0xcccccc; // For feedback reference
-
-createStation("CPS1", { x: -15, z: -10 }, 0xff0000, {
-    requires: { 'NH3': 1, 'HCO3': 1, 'ATP': 2 },
-    produces: 'Carbamoyl Phosphate',
-    productColors: { 'Carbamoyl Phosphate': carbPhosColor },
-    requiredQuestState: QUEST_STATE.STEP_2_MAKE_CARB_PHOS,  // State needed to USE the station
-    advancesQuestTo: QUEST_STATE.STEP_3_MEET_USHER // State AFTER successful use
-});
-
-createStation("OTC", { x: -11, z: -10 }, 0xff4500, {
-    requires: { 'Carbamoyl Phosphate': 1, 'Ornithine': 1 },
-    produces: 'Citrulline',
-    productColors: { 'Citrulline': citrullineColor },
-    requiredQuestState: QUEST_STATE.STEP_4_MAKE_CITRULLINE, // State needed to USE the station
-    // advancesQuestTo: QUEST_STATE.STEP_5_TRANSPORT_CIT // Advance occurs after talking to Usher with Citrulline
-    // Keep null or same state if advancement happens elsewhere
-     advancesQuestTo: QUEST_STATE.STEP_4_MAKE_CITRULLINE // Does not advance state on its own
-});
-
-createStation("ASS", { x: 6, z: 0 }, 0x00ff00, {
-    requires: { 'Citrulline': 1, 'Aspartate': 1, 'ATP': 1 },
-    produces: 'Argininosuccinate',
-    productColors: { 'Argininosuccinate': argSuccColor },
-    requiredQuestState: QUEST_STATE.STEP_7_MAKE_ARGSUCC, // State needed to USE the station
-    advancesQuestTo: QUEST_STATE.STEP_8_CLEAVE_ARGSUCC // State AFTER successful use
-});
-
-createStation("ASL", { x: 6, z: 5 }, 0x00ced1, {
-    requires: { 'Argininosuccinate': 1 },
-    produces: ['Arginine', 'Fumarate'],
-    productColors: { 'Arginine': arginineColor, 'Fumarate': fumarateColor },
-    requiredQuestState: QUEST_STATE.STEP_8_CLEAVE_ARGSUCC, // State needed to USE the station
-    advancesQuestTo: QUEST_STATE.STEP_9_MAKE_UREA // State AFTER successful use
-});
-
-createStation("ARG1", { x: 10, z: 2 }, 0x0000ff, {
-    requires: { 'Arginine': 1 },
-    produces: ['Urea', 'Ornithine'],
-    productColors: { 'Urea': ureaColor, 'Ornithine': ornithineColor },
-    requiredQuestState: QUEST_STATE.STEP_9_MAKE_UREA, // State needed to USE the station
-    // advancesQuestTo: QUEST_STATE.STEP_10_RIVER_CHALLENGE // Advance occurs after talking to Prof with Urea
-     advancesQuestTo: QUEST_STATE.STEP_9_MAKE_UREA // Does not advance state on its own
-});
-
+const professorHepaticus = createProfessorHepaticus(new THREE.Vector3(-4.5, 0, -1));
+const usherMaterial = new THREE.MeshStandardMaterial({ color: 0x8a2be2 }); const usherGeometry = new THREE.CapsuleGeometry(0.4, 1.0, 4, 8); const ornithineUsher = new THREE.Mesh(usherGeometry, usherMaterial); ornithineUsher.position.set(-4.5, 0.7, -4); ornithineUsher.castShadow = true; ornithineUsher.userData = { type: 'npc', name: 'Ornithine Usher' }; scene.add(ornithineUsher); interactiveObjects.push(ornithineUsher); originalMaterials.set(ornithineUsher, usherMaterial.clone()); const usherLabel = createTextSprite("Ornithine Usher", { x: -4.5, y: 2.2, z: -4 }, { fontSize: 36, scale: 1.5 }); scene.add(usherLabel);
+const carbPhosColor = 0xff3333; const citrullineColor = 0xff8c00; const argSuccColor = 0x33ff33; const arginineColor = 0x6666ff; const ureaColor = 0xdddddd; const ornithineColor = 0xaaccaa; const fumarateColor = 0xcccccc; // Added fumarate color
+createStation("CPS1", { x: -15, z: -10 }, 0xff0000, { requires: { 'NH3': 1, 'HCO3': 1, 'ATP': 2 }, produces: 'Carbamoyl Phosphate', productColors: { 'Carbamoyl Phosphate': carbPhosColor }, requiredQuestState: QUEST_STATE.STEP_2_MAKE_CARB_PHOS, advancesQuestTo: QUEST_STATE.STEP_3_MEET_USHER });
+createStation("OTC", { x: -11, z: -10 }, 0xff4500, { requires: { 'Carbamoyl Phosphate': 1, 'Ornithine': 1 }, produces: 'Citrulline', productColors: { 'Citrulline': citrullineColor }, requiredQuestState: QUEST_STATE.STEP_4_MAKE_CITRULLINE, advancesQuestTo: QUEST_STATE.STEP_4_MAKE_CITRULLINE });
+createStation("ASS", { x: 6, z: 0 }, 0x00ff00, { requires: { 'Citrulline': 1, 'Aspartate': 1, 'ATP': 1 }, produces: 'Argininosuccinate', productColors: { 'Argininosuccinate': argSuccColor }, requiredQuestState: QUEST_STATE.STEP_7_MAKE_ARGSUCC, advancesQuestTo: QUEST_STATE.STEP_8_CLEAVE_ARGSUCC });
+createStation("ASL", { x: 6, z: 5 }, 0x00ced1, { requires: { 'Argininosuccinate': 1 }, produces: ['Arginine', 'Fumarate'], productColors: { 'Arginine': arginineColor, 'Fumarate': fumarateColor }, requiredQuestState: QUEST_STATE.STEP_8_CLEAVE_ARGSUCC, advancesQuestTo: QUEST_STATE.STEP_9_MAKE_UREA }); // Updated produces/colors
+createStation("ARG1", { x: 10, z: 2 }, 0x0000ff, { requires: { 'Arginine': 1 }, produces: ['Urea', 'Ornithine'], productColors: { 'Urea': ureaColor, 'Ornithine': ornithineColor }, requiredQuestState: QUEST_STATE.STEP_9_MAKE_UREA, advancesQuestTo: QUEST_STATE.STEP_9B_DISPOSE_UREA });
 // ORN T1 Portal
 const portalGeometry = new THREE.TorusGeometry(1.5, 0.3, 16, 50);
-const portalMaterial = new THREE.MeshStandardMaterial({
-    color: 0x00ffff,
-    emissive: 0x00aaaa,
-    roughness: 0.4,
-    metalness: 0.6,
-    side: THREE.DoubleSide
-});
+const portalMaterial = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, roughness: 0.4, metalness: 0.6, side: THREE.DoubleSide });
 const ornT1Portal = new THREE.Mesh(portalGeometry, portalMaterial);
-ornT1Portal.position.set(portalWallX + 0.25, 1.6, portalWallCenterZ); // Position slightly offset from wall line
+ornT1Portal.position.set(portalWallX + 0.25, 1.6, portalWallCenterZ);
 ornT1Portal.rotation.y = Math.PI / 2; // Perpendicular to the wall
-ornT1Portal.userData = {
-    type: 'portal',
-    name: 'ORN T1 Portal',
-    requiredQuestState: QUEST_STATE.STEP_5_TRANSPORT_CIT, // State required to USE portal
-    requires: { 'Citrulline': 1 },
-    advancesQuestTo: QUEST_STATE.STEP_6_GATHER_CYTO, // State AFTER successful use
-    action: 'transportCitrulline',
-    productColor: citrullineColor // Color for spawned Citrulline
-};
-scene.add(ornT1Portal);
-interactiveObjects.push(ornT1Portal);
-originalMaterials.set(ornT1Portal, portalMaterial.clone());
-const portalLabel = createTextSprite("ORN T1 Portal",
-    { x: ornT1Portal.position.x, y: 3.5, z: ornT1Portal.position.z },
-    { fontSize: 36, scale: 1.5 }
-);
-scene.add(portalLabel);
-
-// Portal Barrier
-const barrierGeometry = new THREE.PlaneGeometry(portalGapWidth - 0.1, wallHeight - 0.1);
-const barrierMaterial = new THREE.MeshStandardMaterial({
-    color: 0x00ffff,
-    emissive: 0x00aaaa,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.DoubleSide,
-    depthWrite: false // Important for transparency rendering
-});
-portalBarrier = new THREE.Mesh(barrierGeometry, barrierMaterial);
-portalBarrier.position.set(portalWallX, wallHeight / 2, portalWallCenterZ);
-portalBarrier.rotation.y = Math.PI / 2; // Rotated to be perpendicular to the wall (align with gap)
-portalBarrier.name = "PortalBarrier";
-scene.add(portalBarrier);
-collidableWalls.push(portalBarrier); // Add to collidables initially
-portalBarrier.updateMatrixWorld();
-wallBoundingBoxes.push(new THREE.Box3().setFromObject(portalBarrier)); // Add its bounding box
-
-// Resources
-createResource('NH3',     { x: -16.5, z: -4 }, 0xffaaaa);
-// HCO3 created above cabinet
-createResource('ATP',     { x: -10, z: -13 }, 0xffffaa);
-createResource('ATP',     { x: -16, z: -13 }, 0xffffaa);
-// Remove initial Ornithine spawn - it will be created after talking to Usher in STEP_3
-// createResource('Ornithine', { x: -8, z: -6 }, 0xaaccaa);
-createResource('Aspartate', { x: 3, z: 2 }, 0xffaaff);
-createResource('ATP',       { x: 0, z: 0 }, 0xffffaa); // ATP in cytosol
-
+ornT1Portal.userData = { type: 'portal', name: 'ORN T1 Portal', requiredQuestState: QUEST_STATE.STEP_5A_OPEN_PORTAL, requires: { 'Citrulline': 1 }, advancesQuestTo: QUEST_STATE.STEP_6_GATHER_CYTO, action: 'transportCitrulline', productColor: citrullineColor };
+scene.add(ornT1Portal); interactiveObjects.push(ornT1Portal); originalMaterials.set(ornT1Portal, portalMaterial.clone());
+const portalLabel = createTextSprite("ORN T1 Portal", { x: ornT1Portal.position.x, y: 3.5, z: ornT1Portal.position.z }, { fontSize: 36, scale: 1.5 }); scene.add(portalLabel);
+const barrierGeometry = new THREE.PlaneGeometry(portalGapWidth - 0.1, wallHeight - 0.1); const barrierMaterial = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false });
+portalBarrier = new THREE.Mesh(barrierGeometry, barrierMaterial); portalBarrier.position.set(portalWallX, wallHeight / 2, portalWallCenterZ); portalBarrier.rotation.y = Math.PI / 2; portalBarrier.name = "PortalBarrier"; scene.add(portalBarrier); collidableWalls.push(portalBarrier); portalBarrier.updateMatrixWorld(); wallBoundingBoxes.push(new THREE.Box3().setFromObject(portalBarrier));
+createResource('NH3', { x: -16.5, z: -4 }, 0xffaaaa); createResource('ATP', { x: -10, z: -13 }, 0xffffaa); createResource('ATP', { x: -16, z: -13 }, 0xffffaa); createResource('Aspartate', { x: 3, z: 2 }, 0xffaaff); createResource('ATP', { x: 0, z: 0 }, 0xffffaa); // ATP in cytosol
+const wasteBucket = createWasteBucket(new THREE.Vector3(8, 0, -1)); // Position in cytosol
+const krebsFurnace = createKrebsFurnace(new THREE.Vector3(7, 0, 7)); // Add the Krebs Furnace near ASL
 
 // --- UI Functions ---
 function updateInventoryUI() { inventoryList.innerHTML = ''; let hasItems = false; for (const itemName in inventory) { if (inventory[itemName] > 0) { const li = document.createElement('li'); li.textContent = `${itemName}: ${inventory[itemName]}`; inventoryList.appendChild(li); hasItems = true; } } if (!hasItems) { inventoryList.innerHTML = '<li>Empty</li>'; } }
-function showDialogue(text, options = []) { dialogueText.textContent = text; dialogueOptions.innerHTML = ''; options.forEach(opt => { const button = document.createElement('button'); button.textContent = opt.text; button.onclick = () => { hideDialogue(); if (opt.action) opt.action(); }; dialogueOptions.appendChild(button); }); dialogueBox.classList.remove('hidden'); controls.enabled = false; isUserInteracting = true; } // Set isUserInteracting
-function hideDialogue() { dialogueBox.classList.add('hidden'); controls.enabled = true; isUserInteracting = false; } // Reset isUserInteracting
+function showDialogue(text, options = []) { dialogueText.textContent = text; dialogueOptions.innerHTML = ''; options.forEach(opt => { const button = document.createElement('button'); button.textContent = opt.text; button.onclick = () => { hideDialogue(); if (opt.action) opt.action(); }; dialogueOptions.appendChild(button); }); dialogueBox.classList.remove('hidden'); controls.enabled = false; isUserInteracting = true; }
+function hideDialogue() { dialogueBox.classList.add('hidden'); controls.enabled = true; isUserInteracting = false; }
 function updateQuestUI() { if (currentQuest) { questNameUI.textContent = currentQuest.name; questObjectiveUI.textContent = currentQuest.objectives[currentQuest.state] || 'Completed!'; } else { questNameUI.textContent = 'None'; questObjectiveUI.textContent = 'Find and speak with Professor Hepaticus.'; } }
 function showFeedback(message, duration = 2500) { const feedback = document.createElement('div'); feedback.style.position = 'absolute'; feedback.style.bottom = '150px'; feedback.style.left = '50%'; feedback.style.transform = 'translateX(-50%)'; feedback.style.backgroundColor = 'rgba(0, 0, 0, 0.8)'; feedback.style.color = 'white'; feedback.style.padding = '10px 20px'; feedback.style.borderRadius = '5px'; feedback.textContent = message; feedback.style.pointerEvents = 'none'; feedback.style.zIndex = '10'; uiContainer.appendChild(feedback); setTimeout(() => { if (feedback.parentNode) feedback.parentNode.removeChild(feedback); }, duration); }
 function showInteractionPrompt(objectName) { if (interactionPrompt) { interactionText.textContent = objectName; interactionPrompt.classList.remove('hidden'); } }
 function hideInteractionPrompt() { if (interactionPrompt) { interactionPrompt.classList.add('hidden'); } }
-
 
 // --- Inventory Functions ---
 function addToInventory(itemName, quantity = 1) { inventory[itemName] = (inventory[itemName] || 0) + quantity; updateInventoryUI(); }
@@ -638,561 +314,341 @@ function removeFromInventory(itemName, quantity = 1) { if (inventory[itemName] &
 function hasItems(requiredItems) { for (const itemName in requiredItems) { if (!inventory[itemName] || inventory[itemName] < requiredItems[itemName]) { return false; } } return true; }
 
 // --- Quest Functions ---
-function startQuest(quest) { if (!currentQuest) { currentQuest = quest; currentQuest.state = QUEST_STATE.STEP_1_GATHER_MITO; updateQuestUI(); showFeedback(`Quest Started: ${quest.name}`); } }
+function startQuest(quest) { if (!currentQuest) { currentQuest = { ...quest }; currentQuest.state = QUEST_STATE.STEP_1_GATHER_MITO; updateQuestUI(); showFeedback(`Quest Started: ${quest.name}`); } }
 function advanceQuest(quest, newState) {
-    if (currentQuest && currentQuest.id === quest.id && currentQuest.state !== newState) { // Prevent re-advancing to same state
+    if (currentQuest && currentQuest.id === quest.id && currentQuest.state !== newState) {
         console.log(`Advancing quest ${quest.id} from ${currentQuest.state} to ${newState}`);
         currentQuest.state = newState;
-        updateQuestUI();
-        if (newState === QUEST_STATE.COMPLETED) {
+        updateQuestUI(); // Update UI immediately
+
+        if (newState === QUEST_STATE.STEP_6_GATHER_CYTO) {
+            showFeedback(`Objective Updated!`);
+            // Check if items for next step are already present (e.g., player collected early)
+            if (hasItems({ 'Citrulline': 1, 'Aspartate': 1, 'ATP': 1 })) {
+                 console.log("Items for STEP_7 already present upon entering STEP_6. Advancing immediately.");
+                 // Use setTimeout to ensure feedback is visible briefly before the next one
+                 setTimeout(() => {
+                     advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_7_MAKE_ARGSUCC);
+                     showFeedback("Cytosol materials gathered! Head to the ASS station.");
+                 }, 50); // Small delay
+                 return; // Prevent duplicate feedback
+            }
+        }
+        else if (newState === QUEST_STATE.COMPLETED) {
             const rewardPoints = quest.rewards?.knowledgePoints || 0;
             showFeedback(`Quest Complete: ${quest.name}! +${rewardPoints} KP`, 5000);
-            // Small delay before clearing quest to allow UI updates/feedback
-            setTimeout(() => {
-                if(currentQuest && currentQuest.state === QUEST_STATE.COMPLETED) { // Check state again
-                     currentQuest = null;
-                     updateQuestUI(); // Update UI to show no quest
-                }
-            }, 100);
+            // Clear current quest slightly later to ensure completion message stays
+             setTimeout(() => { if(currentQuest?.state === QUEST_STATE.COMPLETED) { currentQuest = null; updateQuestUI(); } }, 100);
         } else {
-             // Optional: Feedback on step change
-             // showFeedback(`Objective Updated: ${currentQuest.objectives[newState]}`);
+             // For other steps, just updating the UI is often enough feedback
+             // showFeedback(`Objective Updated!`); // Can be uncommented if desired
         }
     } else if (currentQuest && currentQuest.id === quest.id && currentQuest.state === newState) {
-        // console.log(`Quest ${quest.id} already in state ${newState}. No advancement.`);
+        // Already in this state, do nothing.
     }
 }
 
 
 // --- Reality River Functions ---
-function startRealityRiver() { currentRiverQuestionIndex = 0; riverCorrectAnswers = 0; realityRiverUI.classList.remove('hidden'); displayRiverQuestion(); updateRiverProgress(); controls.enabled = false; isUserInteracting = true; } // Set isUserInteracting
+function startRealityRiver() { currentRiverQuestionIndex = 0; riverCorrectAnswers = 0; realityRiverUI.classList.remove('hidden'); displayRiverQuestion(); updateRiverProgress(); controls.enabled = false; isUserInteracting = true; }
 function displayRiverQuestion() { if (currentRiverQuestionIndex >= ureaRiverQuestions.length) { endRealityRiver(true); return; } const qData = ureaRiverQuestions[currentRiverQuestionIndex]; riverQuestionUI.textContent = qData.q; riverAnswersUI.innerHTML = ''; riverFeedbackUI.textContent = ''; qData.a.forEach((answer, index) => { const button = document.createElement('button'); button.textContent = answer; button.onclick = () => checkRiverAnswer(index); riverAnswersUI.appendChild(button); }); }
 function checkRiverAnswer(selectedIndex) { const qData = ureaRiverQuestions[currentRiverQuestionIndex]; if (selectedIndex === qData.correct) { riverFeedbackUI.textContent = "Correct! Moving forward..."; riverFeedbackUI.style.color = 'lightgreen'; riverCorrectAnswers++; currentRiverQuestionIndex++; updateRiverProgress(); const buttons = riverAnswersUI.querySelectorAll('button'); buttons.forEach(b => b.disabled = true); setTimeout(() => { if (currentRiverQuestionIndex >= ureaRiverQuestions.length) { endRealityRiver(true); } else { displayRiverQuestion(); } }, 1000); } else { riverFeedbackUI.textContent = "Not quite. Think about the process..."; riverFeedbackUI.style.color = 'lightcoral'; } }
 function updateRiverProgress() { let progress = "["; const totalSteps = ureaRiverQuestions.length; for(let i = 0; i < totalSteps; i++) { progress += (i < riverCorrectAnswers) ? "■" : "□"; } progress += "]"; riverProgressUI.textContent = progress; }
-function endRealityRiver(success) { realityRiverUI.classList.add('hidden'); controls.enabled = true; isUserInteracting = false; // Reset isUserInteracting
-    if (success) { showDialogue("Impressive! You've navigated the Urea Cycle...", [ { text: "Great!", action: () => advanceQuest(ureaCycleQuest, QUEST_STATE.COMPLETED) } ]); } else { showDialogue("Hmm, seems you need to review...", [ { text: "Okay" } ]); } }
+function endRealityRiver(success) { realityRiverUI.classList.add('hidden'); controls.enabled = true; isUserInteracting = false; if (success) { showDialogue("Impressive! You've navigated the Urea Cycle...", [ { text: "Great!", action: () => advanceQuest(ureaCycleQuest, QUEST_STATE.COMPLETED) } ]); } else { showDialogue("Hmm, seems you need to review...", [ { text: "Okay" } ]); } }
 
 // --- Helper: Remove Portal Barrier ---
 function removePortalBarrier() {
-    if (portalBarrier && portalBarrier.parent === scene) { // Check it exists and is in scene
-        console.log("Attempting to remove portal barrier...");
-        // Remove from collision checks
+    if (portalBarrier && portalBarrier.parent === scene) {
+        console.log("Removing portal barrier NOW.");
         const barrierIndex = collidableWalls.indexOf(portalBarrier);
-        if (barrierIndex > -1) {
-            collidableWalls.splice(barrierIndex, 1);
-            console.log("Removed barrier from collidableWalls array.");
-        } else {
-            console.warn("Portal barrier mesh not found in collidableWalls array.");
-        }
-
-        // Find and remove the corresponding bounding box
-        const boxIndexToRemove = wallBoundingBoxes.findIndex(box => {
-             // Comparing center might be unreliable if box wasn't updated perfectly
-             // Check if the box dimensions and approximate position match the barrier
-             const boxCenter = new Vector3(); box.getCenter(boxCenter);
-             const boxSize = new Vector3(); box.getSize(boxSize);
-             const barrierSize = portalBarrier.geometry.parameters; // Approx size
-             return boxCenter.distanceToSquared(portalBarrier.position) < 0.1 &&
-                    Math.abs(boxSize.x - barrierSize.width) < 0.1 &&
-                    Math.abs(boxSize.y - barrierSize.height) < 0.1;
-         });
-         if (boxIndexToRemove > -1) {
-            wallBoundingBoxes.splice(boxIndexToRemove, 1);
-            console.log("Removed barrier bounding box from wallBoundingBoxes array.");
-         } else {
-             console.warn("Could not find portal barrier bounding box to remove accurately.");
-             // Fallback: Try removing any box near the portal's position as a last resort
-             const fallbackIndex = wallBoundingBoxes.findIndex(box => {
-                 const boxCenter = new Vector3(); box.getCenter(boxCenter);
-                 return boxCenter.distanceToSquared(portalBarrier.position) < 1.0;
-             });
-             if (fallbackIndex > -1) {
-                 wallBoundingBoxes.splice(fallbackIndex, 1);
-                 console.log("Removed barrier bounding box via fallback position check.");
-             } else {
-                 console.warn("Fallback check also failed to find barrier bounding box.");
-             }
-         }
-
-        // Remove visually
+        if (barrierIndex > -1) { collidableWalls.splice(barrierIndex, 1); } else { console.warn("Barrier not in collidables."); }
+        const boxIndexToRemove = wallBoundingBoxes.findIndex(box => { const c = new Vector3(); box.getCenter(c); return c.distanceToSquared(portalBarrier.position) < 0.1; });
+        if (boxIndexToRemove > -1) { wallBoundingBoxes.splice(boxIndexToRemove, 1); } else { console.warn("Barrier BBox not found."); }
         scene.remove(portalBarrier);
-        // Optionally dispose geometry/material if not reused
-        portalBarrier.geometry.dispose();
-        portalBarrier.material.dispose();
-        portalBarrier = null; // Clear reference
-        showFeedback("Pathway to Cytosol is now open!");
-        console.log("Portal barrier removed from scene.");
-    } else {
-         console.log("Portal barrier already removed or doesn't exist.");
-    }
+        portalBarrier.geometry.dispose(); portalBarrier.material.dispose(); portalBarrier = null;
+    } else { console.log("Portal barrier already removed or doesn't exist."); }
 }
 
 
 // --- Interaction Logic (Triggered by 'E' key press) ---
 function interactWithObject(object) {
-    if (!object || isUserInteracting) return; // Prevent interaction if UI is active
+    if (!object || isUserInteracting) return;
     const userData = object.userData;
 
     // --- NPC Interactions ---
     if (userData.type === 'npc' && userData.name === 'Professor Hepaticus') {
-        isUserInteracting = true; // Pause game for dialogue
+        isUserInteracting = true;
         if (currentQuest && currentQuest.id === 'ureaCycle') {
-             // Check for Urea in inventory for final step trigger only when in the appropriate preceding state
-            if (currentQuest.state === QUEST_STATE.STEP_9_MAKE_UREA && hasItems({ 'Urea': 1 })) {
-                // Advance state *before* showing dialogue that depends on the new state
-                // currentQuest.state = QUEST_STATE.STEP_10_RIVER_CHALLENGE; // Advance state first
-                // updateQuestUI(); // Update UI immediately
-                showDialogue("Excellent work converting that ammonia and producing Urea! Now, can you recall the steps? Cross the River of Recall!", [
-                    { text: "Let's do it!", action: () => {
-                        advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_10_RIVER_CHALLENGE); // Advance state ON action
-                        startRealityRiver();
-                        // isUserInteracting remains true during river game
-                    }},
-                    { text: "Not yet.", action: () => { isUserInteracting = false; } } // Unpause if declined
-                ]);
-            } else if (currentQuest.state === QUEST_STATE.STEP_10_RIVER_CHALLENGE) {
-                 showDialogue("Ready to test your knowledge on the Urea Cycle?", [
-                     { text: "Yes, start the challenge!", action: () => startRealityRiver() }, // isUserInteracting remains true
-                     { text: "Give me a moment.", action: () => { isUserInteracting = false; } } // Unpause
-                 ]);
+            if (currentQuest.state === QUEST_STATE.STEP_10_RIVER_CHALLENGE) {
+                 showDialogue("Ready to test your knowledge on the Urea Cycle?", [ { text: "Yes, start the challenge!", action: startRealityRiver }, { text: "Give me a moment.", action: () => { isUserInteracting = false; } }]);
             } else if (currentQuest.state === QUEST_STATE.COMPLETED) {
-                 showDialogue("Thanks again for helping clear the ammonia!", [{ text: "You're welcome.", action: () => { isUserInteracting = false; } }]); // Unpause on close
+                 showDialogue("Thanks again for helping clear the ammonia!", [{ text: "You're welcome.", action: () => { isUserInteracting = false; } }]);
             } else {
-                 // Show current objective if quest active but not at a specific interaction point
-                 showDialogue(`Current Objective: ${currentQuest.objectives[currentQuest.state]}`, [{ text: "Okay", action: () => { isUserInteracting = false; } }]); // Unpause
+                 showDialogue(`Current Objective: ${currentQuest.objectives[currentQuest.state]}`, [{ text: "Okay", action: () => { isUserInteracting = false; } }]);
             }
         } else if (!currentQuest) {
-             // Start the quest
-             showDialogue("The cell is overwhelmed with ammonia! We need to convert it to Urea. Can you help?", [
-                 { text: "Accept Quest", action: () => { startQuest(ureaCycleQuest); isUserInteracting = false; } }, // Start quest and unpause
-                 { text: "Decline", action: () => { isUserInteracting = false; } } // Unpause
-             ]);
-        } else {
-             // A different quest is active? Or some other edge case.
-             isUserInteracting = false; // Unpause if no specific interaction
-        }
+             showDialogue("The cell is overwhelmed with ammonia! We need to convert it to Urea. Can you help?", [ { text: "Accept Quest", action: () => { startQuest(ureaCycleQuest); isUserInteracting = false; } }, { text: "Decline", action: () => { isUserInteracting = false; } }]);
+        } else { isUserInteracting = false; }
     }
     else if (userData.type === 'npc' && userData.name === 'Ornithine Usher') {
-        isUserInteracting = true; // Pause game for dialogue
+        isUserInteracting = true;
         if (currentQuest && currentQuest.id === 'ureaCycle') {
             if (currentQuest.state === QUEST_STATE.STEP_3_MEET_USHER) {
-                // First interaction - explain Ornithine and give it
-                showDialogue("Ah, you've made Carbamoyl Phosphate! You'll need Ornithine next...", [ // Shortened text
-                    { text: "Can I have some Ornithine?", action: () => {
-                        const ornithineSpawnPos = { x: -8, z: -6 }; // Defined position
-                        createResource('Ornithine', ornithineSpawnPos, ornithineColor, { initialY: 0.6});
-                        showFeedback("Ornithine has appeared nearby!");
-                        advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_4_MAKE_CITRULLINE);
-                        isUserInteracting = false; // Unpause after action
-                    }},
-                    { text: "Tell me more...", action: () => { // Nested dialogue needs careful handling of isUserInteracting
-                        showDialogue("Ornithine gets recycled... It's consumed when making Citrulline, but regenerated later...", [
-                            { text: "I see! Can I have some?", action: () => {
-                                const ornithineSpawnPos = { x: -8, z: -6 };
-                                createResource('Ornithine', ornithineSpawnPos, ornithineColor, { initialY: 0.6 });
-                                showFeedback("Ornithine has appeared nearby!");
-                                advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_4_MAKE_CITRULLINE);
-                                // isUserInteracting remains true until this inner dialogue is closed
-                                // The button click automatically calls hideDialogue, which sets it to false.
-                            }}
-                        ]);
-                        // Don't set isUserInteracting = false here, let inner dialogue handle it
-                    }}
-                ]);
+                 showDialogue("Ah, you've made Carbamoyl Phosphate! You'll need Ornithine next. Ornithine is a non-protein amino acid that's crucial for the urea cycle. It acts as a carrier molecule, helping to transport nitrogen atoms through the cycle.", [ { text: "Can I have some Ornithine?", action: () => { const p = { x: -8, z: -6 }; createResource('Ornithine', p, ornithineColor, {initialY: 0.6}); showFeedback("Ornithine appeared!"); advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_4_MAKE_CITRULLINE); isUserInteracting = false; }}, { text: "Tell me more about Ornithine", action: () => { showDialogue("Ornithine is special because it gets recycled... When you make Citrulline, Ornithine is consumed. But later, when Arginine is cleaved to make Urea, Ornithine is regenerated!...called the Ornithine Cycle!", [{ text: "I see! Can I have some?", action: () => { const p = { x: -8, z: -6 }; createResource('Ornithine', p, ornithineColor, {initialY: 0.6}); showFeedback("Ornithine appeared!"); advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_4_MAKE_CITRULLINE); }}]); }} ]);
             } else if (currentQuest.state === QUEST_STATE.STEP_4_MAKE_CITRULLINE) {
-                const hasCitrulline = hasItems({ 'Citrulline': 1 });
-                if (hasCitrulline) {
-                    // Player has Citrulline, remove barrier and advance state
-                    removePortalBarrier(); // Remove the physical barrier
-                    advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_5_TRANSPORT_CIT); // Advance to transport step
-                    showDialogue("Excellent! You've made Citrulline. The pathway is now open! Use the ORN T1 Portal...", [
-                        { text: "Let's transport Citrulline", action: () => { isUserInteracting = false; } } // Unpause
-                        // Add "Tell me more" option if needed
-                    ]);
-                } else {
-                    // Player in step 4 but hasn't made Citrulline yet
-                    showDialogue("You'll need to make and collect Citrulline first. Use the OTC station...", [{ text: "Got it", action: () => { isUserInteracting = false; } }]); // Unpause
-                }
-            } else if (currentQuest.state === QUEST_STATE.STEP_5_TRANSPORT_CIT) {
-                // Player needs to use the portal
-                showDialogue("The pathway is open! Use the ORN T1 Portal with your Citrulline to transport it...", [{ text: "Will do!", action: () => { isUserInteracting = false; } }]); // Unpause
+                if (hasItems({ 'Citrulline': 1 })) {
+                    hasPortalPermission = true; showFeedback("Portal permission granted!"); advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_5A_OPEN_PORTAL);
+                    showDialogue("Excellent! You've made Citrulline. I have granted you passage through the ORN T1 portal. You must activate it yourself using your Citrulline.", [ { text: "Understood.", action: () => { isUserInteracting = false; } }]);
+                } else { showDialogue("You'll need to make and collect Citrulline first. Use the OTC station...", [{ text: "Got it", action: () => { isUserInteracting = false; } }]); }
+            } else if (currentQuest.state === QUEST_STATE.STEP_5A_OPEN_PORTAL) {
+                showDialogue("You have permission. Use the ORN T1 Portal with your Citrulline...", [{ text: "Will do!", action: () => { isUserInteracting = false; } }]);
             } else if (cytosolStates.includes(currentQuest.state)) {
-                // Player is in later steps (cytosol)
-                showDialogue("You've successfully transported Citrulline to the cytosol. Well done!", [{ text: "Thanks!", action: () => { isUserInteracting = false; } }]); // Unpause
-            } else {
-                // Player is in an earlier state (e.g., Step 1 or 2)
-                showDialogue("Come back when you've made Carbamoyl Phosphate at the CPS1 station.", [{ text: "Okay", action: () => { isUserInteracting = false; } }]); // Unpause
-            }
-        } else {
-            // No quest active, or different quest
-            showDialogue("Greetings! I manage the ORN T1 antiport.", [{ text: "Interesting.", action: () => { isUserInteracting = false; } }]); // Unpause
-        }
+                showDialogue("You've transported Citrulline. Well done!", [{ text: "Thanks!", action: () => { isUserInteracting = false; } }]);
+            } else { showDialogue("Come back when you've made Carbamoyl Phosphate.", [{ text: "Okay", action: () => { isUserInteracting = false; } }]); }
+        } else { showDialogue("Greetings! I manage the ORN T1 antiport.", [{ text: "Interesting.", action: () => { isUserInteracting = false; } }]); }
     }
 
     // --- Resource Interaction ---
     else if (userData.type === 'resource') {
-        // No dialogue, interaction is instant
-        addToInventory(userData.name, 1);
-        showFeedback(`Collected ${userData.name}`);
-
-        // Quest advancement check for gathering step
-        if (currentQuest &&
-            currentQuest.id === 'ureaCycle' &&
-            currentQuest.state === QUEST_STATE.STEP_1_GATHER_MITO &&
-            hasItems({ 'NH3': 1, 'HCO3': 1, 'ATP': 2 })) {
-            advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_2_MAKE_CARB_PHOS);
-            showFeedback("All materials gathered! Head to the CPS1 station.");
+        addToInventory(userData.name, 1); showFeedback(`Collected ${userData.name}`);
+        if (currentQuest?.id === 'ureaCycle') {
+            if (currentQuest.state === QUEST_STATE.STEP_1_GATHER_MITO && hasItems({ 'NH3': 1, 'HCO3': 1, 'ATP': 2 })) { advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_2_MAKE_CARB_PHOS); showFeedback("Materials gathered! Head to CPS1."); }
+            else if (currentQuest.state === QUEST_STATE.STEP_6_GATHER_CYTO && hasItems({ 'Citrulline': 1, 'Aspartate': 1, 'ATP': 1 })) { advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_7_MAKE_ARGSUCC); showFeedback("Cytosol materials gathered! Head to ASS."); }
         }
-        // Add similar check for STEP_6_GATHER_CYTO if needed, based on items collected
-        if (currentQuest &&
-            currentQuest.id === 'ureaCycle' &&
-            currentQuest.state === QUEST_STATE.STEP_6_GATHER_CYTO &&
-            hasItems({ 'Citrulline': 1, 'Aspartate': 1, 'ATP': 1 })) {
-             advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_7_MAKE_ARGSUCC); // Ready for ASS station
-             showFeedback("Cytosol materials gathered! Head to the ASS station.");
-        }
-
-
-        // Remove object from world AFTER checks
         scene.remove(userData.object3D);
-        const index = interactiveObjects.indexOf(object); // Use the object passed to function
-         if (index > -1) interactiveObjects.splice(index, 1);
-        const meshIndex = resourceMeshes.indexOf(object);
-         if (meshIndex > -1) resourceMeshes.splice(meshIndex, 1);
-        originalMaterials.delete(object); // Remove material backup
-
-        // Clear closest object if it was the one collected
-        if (closestInteractiveObject === object) {
-             closestInteractiveObject = null;
-             lastClosestObject = null; // Prevent unhighlighting disposed object
-             hideInteractionPrompt();
-         }
-         // No need to set isUserInteracting = false, as it wasn't set true for resources
+        const i = interactiveObjects.indexOf(object); if (i > -1) interactiveObjects.splice(i, 1);
+        const m = resourceMeshes.indexOf(object); if (m > -1) resourceMeshes.splice(m, 1);
+        originalMaterials.delete(object);
+        if (closestInteractiveObject === object) { closestInteractiveObject = null; lastClosestObject = null; hideInteractionPrompt(); }
     }
 
     // --- Station Interaction ---
     else if (userData.type === 'station') {
-        // No dialogue, interaction is instant feedback
-
-        if (!currentQuest || currentQuest.id !== 'ureaCycle') {
-            showFeedback("Quest not active or not the Urea Cycle quest.");
-            return; // Exit interaction
-        }
-
-        // Check if we are in the correct state to use the station
-        if (currentQuest.state !== userData.requiredQuestState) {
-             showFeedback(`Incorrect step for ${userData.name}. Current objective: ${currentQuest.objectives[currentQuest.state]}`);
-             return; // Exit interaction
-        }
-
-        // Check if player has required items
+        if (!currentQuest || currentQuest.id !== 'ureaCycle') { showFeedback("Quest not active."); return; }
+        if (currentQuest.state !== userData.requiredQuestState) { showFeedback(`Incorrect step for ${userData.name}. Objective: ${currentQuest.objectives[currentQuest.state]}`); return; }
         if (hasItems(userData.requires)) {
-            let consumed = true;
-            // Consume required items
-            for (const itemName in userData.requires) {
-                if (!removeFromInventory(itemName, userData.requires[itemName])) {
-                    consumed = false;
-                    console.error("Inventory inconsistency!");
-                    showFeedback("Inventory error!", 2000); // Show error feedback
-                    break;
-                }
-            }
-
+            let consumed = true; for (const item in userData.requires) { if (!removeFromInventory(item, userData.requires[item])) { consumed = false; console.error("Inventory error removing required item:", item); showFeedback("Inventory error!", 2000); break; } }
             if (consumed) {
-                showFeedback(`Using ${userData.name}... Reaction occurring!`);
+                showFeedback(`Using ${userData.name}...`);
+                let prods = [];
+                if (typeof userData.produces === 'string') prods = [userData.produces];
+                else if (Array.isArray(userData.produces)) prods = userData.produces;
 
-                // Spawn products
-                let producedItems = [];
-                if (typeof userData.produces === 'string') {
-                    producedItems = [userData.produces];
-                } else if (Array.isArray(userData.produces)) {
-                    producedItems = userData.produces;
-                }
+                const stationObject = object; // Reference the station mesh itself
+                const off = new THREE.Vector3(0, 0, 1.5); // Offset from station center
+                const rot = new THREE.Quaternion();
+                stationObject.getWorldQuaternion(rot);
+                off.applyQuaternion(rot); // Rotate offset based on station orientation
+                const baseP = stationObject.position.clone();
+                let spawnP = baseP.add(off); // Base spawn position in front
+                spawnP.y = 0.6; // Set spawn height
 
-                // Calculate spawn position relative to station
-                const spawnOffset = new THREE.Vector3(0, 0, 1.5); // Offset in front of station
-                 const spawnRotation = new THREE.Quaternion(); // Get station's world rotation
-                 object.getWorldQuaternion(spawnRotation);
-                 spawnOffset.applyQuaternion(spawnRotation); // Rotate offset
+                prods.forEach((itemName, i) => {
+                    const colorHex = userData.productColors?.[itemName] || 0xffffff;
+                    const finalSpawnPos = spawnP.clone();
+                    // Spread multiple products slightly
+                    const spreadOffset = new THREE.Vector3((i - (prods.length - 1) / 2) * 0.6, 0, 0);
+                    spreadOffset.applyQuaternion(rot);
+                    finalSpawnPos.add(spreadOffset);
 
-                 const spawnBasePos = object.position.clone();
-                 let spawnPos = spawnBasePos.add(spawnOffset);
-                 spawnPos.y = 0.6; // Set spawn height
+                    if (itemName === 'Fumarate' && userData.name === 'ASL') {
+                         // Special handling for Fumarate from ASL
+                        const fumarateMesh = createResource(itemName, { x: finalSpawnPos.x, z: finalSpawnPos.z }, colorHex, { initialY: finalSpawnPos.y });
+                        if (fumarateMesh) {
+                            // Make it non-interactive immediately
+                            const iIndex = interactiveObjects.indexOf(fumarateMesh); if (iIndex > -1) interactiveObjects.splice(iIndex, 1);
+                            const rIndex = resourceMeshes.indexOf(fumarateMesh); if (rIndex > -1) resourceMeshes.splice(rIndex, 1);
+                            originalMaterials.delete(fumarateMesh);
 
-
-                producedItems.forEach((item, i) => {
-                    const itemColorHex = userData.productColors ? userData.productColors[item] : 0xffffff;
-                    const itemColor = parseInt(itemColorHex); // Ensure it's a number
-
-                    if (item && item !== 'Fumarate') {
-                         // Offset multiple items slightly
-                         const multiOffset = new THREE.Vector3((i - (producedItems.length -1)/2) * 0.6, 0, 0); // Spread items side-to-side
-                         multiOffset.applyQuaternion(spawnRotation);
-                         const finalSpawnPos = spawnPos.clone().add(multiOffset);
-
-                         createResource(item, { x: finalSpawnPos.x, z: finalSpawnPos.z }, itemColor, { initialY: 0.6 });
-                         showFeedback(`${item} has appeared near the station!`);
-                    } else if (item === 'Fumarate') {
-                        showFeedback(`Byproduct Fumarate produced (links to other pathways).`);
+                            // Find the furnace
+                            const furnace = scene.children.find(obj => obj.userData?.type === 'krebsFurnace');
+                            if (furnace) {
+                                showFeedback(`Fumarate sent to Krebs Cycle Furnace!`);
+                                // Add animation task
+                                activeAnimations.push({
+                                    mesh: fumarateMesh,
+                                    target: furnace.position.clone().add(new Vector3(0, 0.5, 0)), // Aim slightly above furnace base
+                                    duration: 1.5, // seconds
+                                    elapsed: 0,
+                                    startPos: fumarateMesh.position.clone()
+                                });
+                            } else {
+                                console.warn("Krebs Furnace not found, removing Fumarate directly.");
+                                scene.remove(fumarateMesh);
+                                fumarateMesh.geometry.dispose();
+                                fumarateMesh.material.dispose();
+                            }
+                        }
+                    } else {
+                        // Standard resource creation for other products
+                        createResource(itemName, { x: finalSpawnPos.x, z: finalSpawnPos.z }, colorHex, { initialY: finalSpawnPos.y });
+                        showFeedback(`${itemName} appeared!`);
                     }
                 });
 
-                // Advance quest state if defined for this station
-                if (userData.advancesQuestTo) {
-                    advanceQuest(ureaCycleQuest, userData.advancesQuestTo);
-                    // updateQuestUI is called within advanceQuest
-                }
-
-                 // Specific check AFTER producing Urea
-                 if (userData.name === "ARG1" && producedItems.includes("Urea")) {
-                     showFeedback("Urea produced! Return to Professor Hepaticus.");
-                     // Quest state remains STEP_9_MAKE_UREA, but player now has Urea
-                     // Interaction with Professor will check inventory and state
-                 }
-
-                 // Specific check AFTER producing Ornithine with Urea
-                  if (userData.name === "ARG1" && producedItems.includes("Ornithine")) {
-                       // Ornithine is regenerated, can be collected again if needed elsewhere.
-                  }
-
-
-            } // End if consumed
-        } else {
-            // Calculate and show missing items
-            let missing = "Missing: ";
-            let first = true;
-            for (const itemName in userData.requires) {
-                const requiredAmount = userData.requires[itemName];
-                const currentAmount = inventory[itemName] || 0;
-                if (currentAmount < requiredAmount) {
-                    missing += `${first ? '' : ', '}${requiredAmount - currentAmount} ${itemName}`;
-                    first = false;
-                }
+                if (userData.advancesQuestTo) { advanceQuest(ureaCycleQuest, userData.advancesQuestTo); }
+                if (userData.advancesQuestTo === QUEST_STATE.STEP_9B_DISPOSE_UREA) { showFeedback("Urea produced! Find the Waste Receptacle."); }
             }
-            showFeedback(missing);
-        }
-         // No need to set isUserInteracting = false, as it wasn't set true for stations
+        } else { let miss = "Missing: "; let fir = true; for (const item in userData.requires) { const req = userData.requires[item]; const cur = inventory[item] || 0; if (cur < req) { miss += `${fir ? '' : ', '}${req - cur} ${item}`; fir = false; } } showFeedback(miss); }
     }
+
 
     // --- Portal Interaction ---
     else if (userData.type === 'portal' && userData.name === 'ORN T1 Portal') {
-        // No dialogue, instant interaction
+        if (!currentQuest || currentQuest.id !== 'ureaCycle') { showFeedback("Quest not active."); return; }
+        if (currentQuest.state !== QUEST_STATE.STEP_5A_OPEN_PORTAL) { showFeedback(`Portal cannot be used yet.`); return; }
+        if (!hasPortalPermission) { showFeedback("You don't have permission to activate this portal yet. Talk to the Usher."); return; }
+        if (!hasItems(userData.requires)) { showFeedback("Missing: Citrulline"); return; }
 
-        if (!currentQuest || currentQuest.id !== 'ureaCycle') {
-            showFeedback("Quest not active or portal not relevant.");
-            return;
-        }
-
-        // Check if we are in the correct state to use the portal
-        if (currentQuest.state !== QUEST_STATE.STEP_5_TRANSPORT_CIT) {
-             showFeedback(`Portal cannot be used yet. Current objective: ${currentQuest.objectives[currentQuest.state]}`);
-             return;
-        }
-
-        // Check if we have Citrulline
-        if (hasItems(userData.requires)) {
-
-            // Consume Citrulline from inventory FIRST
-            if (!removeFromInventory('Citrulline', 1)) {
-                 console.error("Failed to remove Citrulline for portal use!");
-                 showFeedback("Error using portal!", 2000);
-                 return;
-            }
-
-            showFeedback("Activating ORN T1 Portal...");
-
-            // Visual effect for the portal mesh
-            const portalMesh = object; // The portal mesh itself
-             if (originalMaterials.has(portalMesh)) {
-                 const originalEmissive = originalMaterials.get(portalMesh).emissive.getHex();
-                 portalMesh.material.emissive.setHex(0xffffff); // Flash white
-                 setTimeout(() => {
-                     // Check if portal still exists and has material before resetting
-                     if (portalMesh && portalMesh.material && originalMaterials.has(portalMesh)) {
-                          portalMesh.material.emissive.setHex(originalEmissive);
-                     }
-                 }, 200);
-             }
-
-            // Spawn Citrulline in cytosol side of the portal
-             // Position relative to the portal's location
-            const spawnPos = { x: portalMesh.position.x + 1.5, z: portalMesh.position.z }; // Adjusted position in cytosol
-            const spawnColor = userData.productColor || citrullineColor; // Use color from userData or default
-             createResource('Citrulline', spawnPos, spawnColor, {initialY: 0.6});
-            showFeedback("Citrulline transported! Collect it in the Cytosol to continue.");
-
-             // Advance quest state AFTER successful transport and spawning
-             if (userData.advancesQuestTo) {
-                 advanceQuest(ureaCycleQuest, userData.advancesQuestTo);
-                 // updateQuestUI is called within advanceQuest
-             }
-
-        } else {
-            showFeedback("Missing: Citrulline");
-        }
-         // No need to set isUserInteracting = false
+        if (!removeFromInventory('Citrulline', 1)) { console.error("Failed to remove Citrulline!"); showFeedback("Error using portal!", 2000); return; }
+        showFeedback("Activating ORN T1 Portal..."); removePortalBarrier();
+        const portalMesh = object; if (originalMaterials.has(portalMesh)) { const origMat = originalMaterials.get(portalMesh); if (origMat && origMat.emissive) { const origE = origMat.emissive.getHex(); portalMesh.material.emissive.setHex(0xffffff); setTimeout(() => { if (portalMesh?.material && originalMaterials.has(portalMesh)) { const currentOrigMat = originalMaterials.get(portalMesh); if(currentOrigMat?.emissive) portalMesh.material.emissive.setHex(currentOrigMat.emissive.getHex()); } }, 200); } }
+        const sPos = { x: portalMesh.position.x + 1.5, z: portalMesh.position.z }; const sCol = userData.productColor || citrullineColor; createResource('Citrulline', sPos, sCol, {initialY: 0.6});
+        showFeedback("Citrulline transported! Collect it in the Cytosol.");
+         if (userData.advancesQuestTo === QUEST_STATE.STEP_6_GATHER_CYTO) { advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_6_GATHER_CYTO); }
+         else { console.warn(`Portal advancement state mismatch! Expected ${QUEST_STATE.STEP_6_GATHER_CYTO}, got ${userData.advancesQuestTo}`); }
     }
 
-     // If interaction occurred but wasn't handled (e.g. non-interactive object somehow triggered), reset flag
-     if (isUserInteracting && dialogueBox.classList.contains('hidden') && realityRiverUI.classList.contains('hidden')) {
+    // --- Waste Bucket Interaction ---
+    else if (userData.type === 'wasteBucket') {
+        if (!currentQuest || currentQuest.id !== 'ureaCycle') { showFeedback("Nothing to dispose right now."); return; }
+        if (currentQuest.state !== QUEST_STATE.STEP_9B_DISPOSE_UREA) { showFeedback("No need to use this yet."); return; }
+        if (!hasItems({ 'Urea': 1 })) { showFeedback("You need Urea to dispose of."); return; }
+        if (removeFromInventory('Urea', 1)) { showFeedback("Urea safely disposed!"); advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_10_RIVER_CHALLENGE); }
+        else { console.error("Failed to remove Urea!"); showFeedback("Error disposing Urea.", 2000); }
+    }
+
+
+    // Reset interaction flag if no UI element took control
+    if (isUserInteracting && dialogueBox.classList.contains('hidden') && realityRiverUI.classList.contains('hidden')) {
          isUserInteracting = false;
      }
-
-
 } // End interactWithObject
 
 
 // --- Event Listeners ---
-document.addEventListener('keydown', (event) => {
-    const key = event.key.toLowerCase();
-    keysPressed[key] = true;
-    // Only allow interaction if not in dialogue/river AND interaction key ('e') is pressed
-    if (key === 'e' && closestInteractiveObject && !isUserInteracting) {
-        interactWithObject(closestInteractiveObject);
-    }
-});
+document.addEventListener('keydown', (event) => { const key = event.key.toLowerCase(); keysPressed[key] = true; if (key === 'e' && closestInteractiveObject && !isUserInteracting) interactWithObject(closestInteractiveObject); });
 document.addEventListener('keyup', (event) => { keysPressed[event.key.toLowerCase()] = false; });
 window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
 
 
 // --- Animation Loop ---
 const clock = new THREE.Clock();
-
-// --- Camera Control Variables ---
-const cameraIdealOffset = new THREE.Vector3(0, 8, -10); // Adjusted for better view (behind and up)
-const cameraIdealLookAt = new THREE.Vector3(0, 1.5, 0); // Look slightly above player feet/center mass
-const cameraPositionSmoothFactor = 0.08; // Controls how fast camera moves to target position (lower = smoother)
-const cameraTargetSmoothFactor = 0.1; // Controls how fast camera lookAt target moves (lower = smoother)
-
-// Reusable vectors for performance
-const playerWorldPos = new THREE.Vector3();
-const cameraTargetPos = new THREE.Vector3();      // Where the camera should ideally be
-const cameraTargetLookAt = new THREE.Vector3();   // Where the camera should ideally look
-const cameraForward = new THREE.Vector3();        // Player/Movement forward relative to camera
-const cameraRight = new THREE.Vector3();          // Player/Movement right relative to camera
-const moveDirection = new THREE.Vector3();        // Final calculated move direction in world space
-const playerVelocity = new THREE.Vector3();       // Player's velocity for the current frame
-const targetQuaternion = new THREE.Quaternion();  // Target rotation for the player model
-const upVector = new THREE.Vector3(0, 1, 0);      // World up direction
-
+const cameraIdealOffset = new THREE.Vector3(0, 8, -10); const cameraIdealLookAt = new THREE.Vector3(0, 1.5, 0);
+const cameraPositionSmoothFactor = 0.08; const cameraTargetSmoothFactor = 0.1;
+const playerWorldPos = new THREE.Vector3(); const cameraTargetPos = new THREE.Vector3(); const cameraTargetLookAt = new THREE.Vector3();
+const cameraForward = new THREE.Vector3(); const cameraRight = new THREE.Vector3(); const moveDirection = new THREE.Vector3();
+const playerVelocity = new THREE.Vector3(); const targetQuaternion = new THREE.Quaternion(); const upVector = new THREE.Vector3(0, 1, 0);
 
 function checkCollision(nextPos) {
-    // Update player's bounding box based on the potential next position
-    playerBoundingBox.setFromCenterAndSize(
-        nextPos.clone().add(new Vector3(0, playerHeight / 2, 0)), // Center the box vertically based on player height
-        new Vector3(playerRadius * 2, playerHeight, playerRadius * 2) // Box dimensions
-    );
+    const playerHeightOffset = new Vector3(0, playerHeight / 2, 0);
+    const playerSize = new Vector3(playerRadius * 2, playerHeight, playerRadius * 2);
+    playerBoundingBox.setFromCenterAndSize(nextPos.clone().add(playerHeightOffset), playerSize);
 
-    // Check for intersection with each wall's bounding box
     for (const wallBox of wallBoundingBoxes) {
         if (playerBoundingBox.intersectsBox(wallBox)) {
-            return true; // Collision detected
+             // Optional: Add slight pushback instead of just stopping
+             // const penetration = new THREE.Vector3();
+             // playerBoundingBox.intersect(wallBox).getSize(penetration); // This isn't quite right for pushback vec
+             // console.log("Collision detected");
+             return true;
         }
     }
-    return false; // No collision
+    return false;
 }
 
 function highlightObject(object) {
-    if (!object) return; // Safety check
-
-    // Handle Groups (like Professor) - find the main mesh to highlight
+    if (!object) return;
+    let meshToHighlight = null;
     if (object instanceof THREE.Group) {
-         // Find a prominent mesh, e.g., the 'coat' or 'body'
-         const meshToHighlight = object.children.find(child => child instanceof THREE.Mesh && (child.name === 'coat' || child.name === 'body' || child.material)); // Fallback to any mesh with material
-         if (meshToHighlight && meshToHighlight.material) {
-             if (!originalMaterials.has(meshToHighlight)) {
-                 originalMaterials.set(meshToHighlight, meshToHighlight.material.clone());
-             }
-             // Check if material is MeshStandardMaterial or similar before setting emissive
-             if (meshToHighlight.material.emissive) {
-                 meshToHighlight.material.emissive.copy(highlightMaterial.emissive);
-                 meshToHighlight.material.emissiveIntensity = highlightMaterial.emissiveIntensity;
-                 meshToHighlight.material.needsUpdate = true;
-             }
-         }
-         return; // Done handling group
+        // Prioritize finding a specific named mesh or the first mesh with material
+        meshToHighlight = object.children.find(child => child instanceof THREE.Mesh && (child.name === 'body' || child.name === 'coat'));
+        if (!meshToHighlight) {
+           meshToHighlight = object.children.find(child => child instanceof THREE.Mesh && child.material);
+        }
+    } else if (object instanceof THREE.Mesh) {
+        meshToHighlight = object;
     }
 
-     // Handle single Meshes
-     if (object instanceof THREE.Mesh && object.material) {
-         if (!originalMaterials.has(object)) {
-             originalMaterials.set(object, object.material.clone()); // Store original material state
-         }
-         // Check if material supports emissive property
-         if (object.material.emissive) {
-            object.material.emissive.copy(highlightMaterial.emissive);
-            object.material.emissiveIntensity = highlightMaterial.emissiveIntensity;
-            object.material.needsUpdate = true; // Important for changes to take effect
-         }
-     }
+    if (meshToHighlight?.material?.emissive) {
+        if (!originalMaterials.has(meshToHighlight)) {
+            originalMaterials.set(meshToHighlight, meshToHighlight.material.clone());
+        }
+        // Only apply highlight if the material has an emissive property
+        if (meshToHighlight.material.emissive) {
+             meshToHighlight.material.emissive.copy(highlightMaterial.emissive);
+             meshToHighlight.material.emissiveIntensity = highlightMaterial.emissiveIntensity;
+             meshToHighlight.material.needsUpdate = true;
+        } else {
+            // console.warn("Attempted to highlight object without emissive material property:", meshToHighlight.name || 'Unnamed Mesh');
+        }
+
+    }
 }
 
 function unhighlightObject(object) {
-     if (!object) return; // Safety check
-
-     // Handle Groups
+    if (!object) return;
+    let meshToUnhighlight = null;
      if (object instanceof THREE.Group) {
-         const meshToUnhighlight = object.children.find(child => child instanceof THREE.Mesh && originalMaterials.has(child)); // Find the mesh we stored material for
-         if (meshToUnhighlight && meshToUnhighlight.material && meshToUnhighlight.material.emissive) {
-             const originalMat = originalMaterials.get(meshToUnhighlight);
-             meshToUnhighlight.material.emissive.copy(originalMat.emissive); // Restore original emissive color
-             meshToUnhighlight.material.emissiveIntensity = originalMat.emissiveIntensity; // Restore original intensity
-             meshToUnhighlight.material.needsUpdate = true;
-         }
-         // Note: We don't remove from originalMaterials map here, allows re-highlighting
-         return; // Done handling group
-     }
+        meshToUnhighlight = object.children.find(child => child instanceof THREE.Mesh && originalMaterials.has(child));
+    } else if (object instanceof THREE.Mesh) {
+        if (originalMaterials.has(object)) {
+             meshToUnhighlight = object;
+        }
+    }
 
-     // Handle single Meshes
-      if (object instanceof THREE.Mesh && object.material && object.material.emissive && originalMaterials.has(object)) {
-          const originalMat = originalMaterials.get(object);
-          object.material.emissive.copy(originalMat.emissive);
-          object.material.emissiveIntensity = originalMat.emissiveIntensity;
-          object.material.needsUpdate = true;
-      }
+    if (meshToUnhighlight?.material?.emissive && originalMaterials.has(meshToUnhighlight)) {
+        const originalMat = originalMaterials.get(meshToUnhighlight);
+         // Only revert if the material has an emissive property
+        if (meshToUnhighlight.material.emissive && originalMat.emissive) {
+            meshToUnhighlight.material.emissive.copy(originalMat.emissive);
+            meshToUnhighlight.material.emissiveIntensity = originalMat.emissiveIntensity;
+            meshToUnhighlight.material.needsUpdate = true;
+        }
+         // Don't delete from originalMaterials map here, it might be needed again
+    }
 }
 
 
 function animate() {
     requestAnimationFrame(animate);
-    const delta = Math.min(clock.getDelta(), 0.1); // Clamp delta to prevent large jumps if tab loses focus
+    const delta = Math.min(clock.getDelta(), 0.1); // Clamp delta time
     const elapsedTime = clock.elapsedTime;
 
-    // --- Player Movement ---
+    // Player Movement
     let moveZ = 0; let moveX = 0;
-    if (!isUserInteracting) { // Only allow movement if not in dialogue/UI interaction
+    if (!isUserInteracting) {
         if (keysPressed['w'] || keysPressed['arrowup']) moveZ = 1;
         if (keysPressed['s'] || keysPressed['arrowdown']) moveZ = -1;
-        if (keysPressed['a'] || keysPressed['arrowleft']) moveX = 1; // Turn Left relative to camera
-        if (keysPressed['d'] || keysPressed['arrowright']) moveX = -1; // Turn Right relative to camera
+        if (keysPressed['a'] || keysPressed['arrowleft']) moveX = 1; // Inverted camera relative control
+        if (keysPressed['d'] || keysPressed['arrowright']) moveX = -1;// Inverted camera relative control
     }
 
-    playerVelocity.set(0, 0, 0); // Reset velocity each frame
-    moveDirection.set(0, 0, 0); // Reset move direction
-
+    playerVelocity.set(0, 0, 0);
+    moveDirection.set(0, 0, 0);
     const playerIsMoving = moveX !== 0 || moveZ !== 0;
 
     if (playerIsMoving) {
-        // Get camera's forward direction vector (ignore y-component)
+        // Get camera direction, ignore pitch
         camera.getWorldDirection(cameraForward);
         cameraForward.y = 0;
         cameraForward.normalize();
 
-        // Get camera's right direction vector
-        cameraRight.crossVectors(upVector, cameraForward).normalize(); // Right = Up x Forward (adjust if coordinate system differs)
+        // Calculate right vector based on camera's forward
+        cameraRight.crossVectors(upVector, cameraForward).normalize(); // upVector is (0,1,0)
 
-        // Calculate movement direction based on input relative to camera
-        moveDirection.addScaledVector(cameraForward, moveZ); // Move forward/backward based on camera direction
-        moveDirection.addScaledVector(cameraRight, moveX);   // Move left/right based on camera direction
-        moveDirection.normalize(); // Ensure consistent speed regardless of direction
+        // Combine inputs relative to camera direction
+        moveDirection.addScaledVector(cameraForward, moveZ);
+        moveDirection.addScaledVector(cameraRight, moveX);
+        moveDirection.normalize(); // Ensure consistent speed regardless of diagonal movement
 
         // Calculate velocity for this frame
         playerVelocity.copy(moveDirection).multiplyScalar(playerSpeed * delta);
 
-        // --- Collision Detection & Resolution (Simple Slide) ---
+        // Collision Detection (Simple Axis Separation)
         const currentPos = player.position.clone();
 
-        // Try moving along X axis
+        // Try moving X
         const nextPosX = currentPos.clone().add(new THREE.Vector3(playerVelocity.x, 0, 0));
         if (!checkCollision(nextPosX)) {
             player.position.x = nextPosX.x;
@@ -1200,7 +656,7 @@ function animate() {
             playerVelocity.x = 0; // Stop X movement if collision
         }
 
-        // Try moving along Z axis (using potentially updated X position)
+        // Try moving Z (using potentially updated position from X check)
         const nextPosZ = player.position.clone().add(new THREE.Vector3(0, 0, playerVelocity.z));
         if (!checkCollision(nextPosZ)) {
             player.position.z = nextPosZ.z;
@@ -1208,36 +664,57 @@ function animate() {
             playerVelocity.z = 0; // Stop Z movement if collision
         }
 
-        // --- Player Rotation ---
-        if (moveDirection.lengthSq() > 0.001) { // Only rotate if moving significantly
-            // Calculate target quaternion to face the movement direction
-            targetQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), moveDirection); // Assumes model's default forward is +Z
-
-            // Smoothly interpolate player's rotation towards the target rotation
-            player.quaternion.slerp(targetQuaternion, 0.2); // Adjust 0.2 for turning speed (higher = faster)
+        // Player Rotation Smoothing
+        if (moveDirection.lengthSq() > 0.001) { // Only rotate if actually moving significantly
+            // Calculate target quaternion based on movement direction
+            targetQuaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), moveDirection); // Assuming base model faces +Z
+            player.quaternion.slerp(targetQuaternion, 0.2); // Smoothly interpolate rotation
         }
     }
 
-    // --- Proximity Interaction Check ---
-    // Run this check even if player isn't moving, but NOT if user is interacting with UI
+    // --- Update Active Animations (e.g., Fumarate to Furnace) ---
+    for (let i = activeAnimations.length - 1; i >= 0; i--) {
+        const anim = activeAnimations[i];
+        anim.elapsed += delta;
+        const progress = Math.min(anim.elapsed / anim.duration, 1.0);
+
+        // Interpolate position
+        anim.mesh.position.lerpVectors(anim.startPos, anim.target, progress);
+
+        // If animation complete
+        if (progress >= 1.0) {
+            scene.remove(anim.mesh);
+            // Safely dispose geometry and material
+            if (anim.mesh.geometry) anim.mesh.geometry.dispose();
+            if (anim.mesh.material) {
+                // Check if material is an array (MultiMaterial)
+                if (Array.isArray(anim.mesh.material)) {
+                    anim.mesh.material.forEach(m => m.dispose());
+                } else {
+                    anim.mesh.material.dispose();
+                }
+            }
+            activeAnimations.splice(i, 1); // Remove from active list
+        }
+    }
+
+
+    // Proximity Check for Interaction Prompt
     if (!isUserInteracting) {
         let minDistSq = interactionRadius * interactionRadius;
         let foundClosest = null;
-        player.getWorldPosition(playerWorldPos); // Get player's current world position
+        player.getWorldPosition(playerWorldPos);
 
         interactiveObjects.forEach(obj => {
             // Ensure object is still valid and in the scene
-             if (obj && obj.parent === scene && obj.visible) {
+            if (obj?.parent === scene && obj.visible) {
                 let objPos = new Vector3();
-                 // Get world position correctly for Groups vs Meshes
-                 if (obj instanceof THREE.Group) {
-                     // For groups, often the group's position is the reference point
-                     objPos.copy(obj.position); // Assumes group position is meaningful anchor
-                 } else if (obj instanceof THREE.Mesh) {
-                     obj.getWorldPosition(objPos); // Get mesh's world position
-                 } else {
-                     return; // Skip if not Group or Mesh
-                 }
+                // Get world position correctly for groups vs meshes
+                if (obj instanceof THREE.Group || obj instanceof THREE.Mesh) {
+                     obj.getWorldPosition(objPos);
+                } else {
+                    return; // Skip non-renderable objects if any crept in
+                }
 
                 const distSq = playerWorldPos.distanceToSquared(objPos);
                 if (distSq < minDistSq) {
@@ -1247,94 +724,80 @@ function animate() {
             }
         });
 
-        // Update highlighting and prompt based on closest object found
+        // Update highlighting and prompt based on closest object
         if (foundClosest !== closestInteractiveObject) {
             if (closestInteractiveObject) {
-                unhighlightObject(closestInteractiveObject); // Unhighlight the previous closest
+                unhighlightObject(closestInteractiveObject);
             }
             if (foundClosest) {
-                highlightObject(foundClosest); // Highlight the new closest
-                showInteractionPrompt(foundClosest.userData.name || 'Object'); // Show prompt
+                highlightObject(foundClosest);
+                showInteractionPrompt(foundClosest.userData.name || 'Object');
             } else {
-                hideInteractionPrompt(); // Hide prompt if nothing is close
+                hideInteractionPrompt();
             }
-            lastClosestObject = closestInteractiveObject; // Keep track of the last object for unhighlighting if needed
-            closestInteractiveObject = foundClosest; // Update the current closest object
+            lastClosestObject = closestInteractiveObject; // Store previous for unhighlighting if needed
+            closestInteractiveObject = foundClosest;
         }
     } else {
-        // If user is interacting with UI, ensure nothing is highlighted and prompt is hidden
+        // If player is interacting via UI, hide prompt and unhighlight
         if (closestInteractiveObject) {
              unhighlightObject(closestInteractiveObject);
              closestInteractiveObject = null;
         }
-         if (lastClosestObject) { // Also unhighlight the last one if interaction started suddenly
-             unhighlightObject(lastClosestObject);
-             lastClosestObject = null;
-         }
+         if (lastClosestObject) { // Ensure last object is also unhighlighted
+            unhighlightObject(lastClosestObject);
+            lastClosestObject = null;
+        }
         hideInteractionPrompt();
     }
 
 
-    // --- Resource Hover Animation ---
+    // Resource Hover Animation
     const hoverSpeed = 2; const hoverAmount = 0.2;
     resourceMeshes.forEach((resource, index) => {
-        // Check if resource still exists and has the necessary data
-        if (resource && resource.parent === scene && resource.userData?.initialY !== undefined) {
+        // Check if resource still exists and has necessary data
+        if (resource?.parent === scene && resource.userData?.initialY !== undefined) {
             const yPos = resource.userData.initialY + Math.sin(elapsedTime * hoverSpeed + index * 0.5) * hoverAmount;
-            // Ensure the calculated position is valid before applying
+            // Check if yPos is a valid number before applying
             if (!isNaN(yPos)) {
                  resource.position.y = yPos;
             }
         }
     });
 
-
-    // --- Third-Person Camera Logic ---
-    // Always update camera based on player, even during interaction (dialogue etc.)
-    // unless specific pausing logic is implemented elsewhere. OrbitControls are disabled for user input.
-    player.getWorldPosition(playerWorldPos); // Get player's updated world position
-
-    // Calculate Ideal Camera Position: Start with offset, rotate it by player's rotation, then add player position
-    cameraTargetPos.copy(cameraIdealOffset);
-    cameraTargetPos.applyQuaternion(player.quaternion); // Rotate offset vector by player's rotation
-    cameraTargetPos.add(playerWorldPos); // Add player's world position
-
-    // Calculate Ideal LookAt Target: Player position + vertical offset
+    // Camera Logic (Smooth Follow)
+    player.getWorldPosition(playerWorldPos); // Get player's current world position
+    // Calculate ideal camera position: start with offset, rotate by player's quaternion, then add player's position
+    cameraTargetPos.copy(cameraIdealOffset).applyQuaternion(player.quaternion).add(playerWorldPos);
+    // Calculate ideal look-at point: player's position plus a vertical offset
     cameraTargetLookAt.copy(playerWorldPos).add(cameraIdealLookAt);
 
-    // Smoothly interpolate camera position and target (Lerp)
-    // Only lerp if not actively interacting with UI that should freeze camera
-    if (!isUserInteracting) { // Only lerp camera if game is not paused by UI
+    if (!isUserInteracting) {
+        // Smoothly interpolate camera position and look-at target
         camera.position.lerp(cameraTargetPos, cameraPositionSmoothFactor);
         controls.target.lerp(cameraTargetLookAt, cameraTargetSmoothFactor);
     } else {
-         // If interacting, maybe snap camera or just stop lerping?
-         // Snapping might be jarring. Stopping lerp keeps it where it was.
-         // Let's keep it simple: Don't lerp if isUserInteracting is true.
-         // Ensure controls.target is updated even if not lerping, so OrbitControls doesn't fight it.
-         controls.target.copy(cameraTargetLookAt); // Keep target updated even if position doesn't lerp
+        // If interacting, snap target but keep camera position potentially lerping
+        controls.target.copy(cameraTargetLookAt);
     }
 
-
-    // Apply OrbitControls damping AFTER manual calculations if damping is enabled
-    controls.update(delta); // This applies damping and updates internal state
+    controls.update(delta); // Update OrbitControls (handles damping)
 
     renderer.render(scene, camera);
 }
 
 // --- Initial Setup Calls ---
 updateInventoryUI();
-updateQuestUI();
-// Set initial camera position and lookAt based on player start
+updateQuestUI(); // Set initial quest state text
+// Set initial camera position based on player start
 player.getWorldPosition(playerWorldPos);
 const initialCamPos = cameraIdealOffset.clone().applyQuaternion(player.quaternion).add(playerWorldPos);
 const initialLookAt = playerWorldPos.clone().add(cameraIdealLookAt);
 camera.position.copy(initialCamPos);
 controls.target.copy(initialLookAt);
-camera.lookAt(controls.target);
-controls.update(); // Initialize OrbitControls state
+camera.lookAt(controls.target); // Point camera initially
+controls.update(); // Apply initial target
 
-loadingScreen.classList.add('hidden'); // Hide loading screen once setup is done
+loadingScreen.classList.add('hidden'); // Hide loading screen
 animate(); // Start the animation loop
-
-console.log("Metabolon RPG Initialized (Original Single File Version).");
+console.log("Metabolon RPG Initialized (v20 - Fumarate Furnace Transfer).");
