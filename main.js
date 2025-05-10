@@ -22,6 +22,182 @@ const uiContainer = document.getElementById('ui-container');
 const interactionPrompt = document.getElementById('interactionPrompt');
 const interactionText = document.getElementById('interactionText');
 
+// --- Audio Setup ---
+const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+let backgroundMusic = null;
+let isMusicPlaying = false;
+
+// GameBoy-style sound generator
+function createGameBoySound(type) {
+    // Resume audio context if it's suspended (needed for Chrome)
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    // Set different waveforms and frequencies based on sound type
+    switch(type) {
+        case 'collect':
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5
+            gainNode.gain.setValueAtTime(0.15, audioContext.currentTime); // Increased volume
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.15);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.15);
+            break;
+            
+        case 'interact':
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // A4
+            gainNode.gain.setValueAtTime(0.15, audioContext.currentTime); // Increased volume
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.2);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.2);
+            break;
+            
+        case 'success':
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(523.25, audioContext.currentTime); // C5
+            gainNode.gain.setValueAtTime(0.15, audioContext.currentTime); // Increased volume
+            oscillator.frequency.setValueAtTime(659.25, audioContext.currentTime + 0.1); // E5
+            oscillator.frequency.setValueAtTime(783.99, audioContext.currentTime + 0.2); // G5
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.3);
+            break;
+    }
+}
+
+// Background music generator (completely revamped with multiple patterns)
+function startBackgroundMusic(patternType = 'default') {
+    if (isMusicPlaying) return;
+    
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+    
+    const masterGain = audioContext.createGain();
+    masterGain.gain.value = 0.02;
+    masterGain.connect(audioContext.destination);
+    
+    const bassOsc = audioContext.createOscillator();
+    const leadOsc = audioContext.createOscillator();
+    const padOsc = audioContext.createOscillator();
+    
+    bassOsc.type = 'sine';
+    leadOsc.type = 'sine';
+    padOsc.type = 'sine';
+    
+    const bassGain = audioContext.createGain();
+    const leadGain = audioContext.createGain();
+    const padGain = audioContext.createGain();
+    
+    bassOsc.connect(bassGain);
+    leadOsc.connect(leadGain);
+    padOsc.connect(padGain);
+    
+    bassGain.connect(masterGain);
+    leadGain.connect(masterGain);
+    padGain.connect(masterGain);
+    
+    // Different patterns based on game state
+    const patterns = {
+        default: [
+            // Original gentle arpeggio pattern
+            [
+                { bass: 261.63, lead: 523.25, pad: 392.00 }, // C4, C5, G4
+                { bass: 293.66, lead: 587.33, pad: 440.00 }, // D4, D5, A4
+                { bass: 329.63, lead: 659.25, pad: 493.88 }, // E4, E5, B4
+                { bass: 349.23, lead: 698.46, pad: 523.25 }  // F4, F5, C5
+            ],
+            // Original rising sequence
+            [
+                { bass: 261.63, lead: 392.00, pad: 523.25 }, // C4, G4, C5
+                { bass: 293.66, lead: 440.00, pad: 587.33 }, // D4, A4, D5
+                { bass: 329.63, lead: 493.88, pad: 659.25 }, // E4, B4, E5
+                { bass: 349.23, lead: 523.25, pad: 698.46 }  // F4, C5, F5
+            ],
+            // Original descending harmony
+            [
+                { bass: 392.00, lead: 523.25, pad: 659.25 }, // G4, C5, E5
+                { bass: 349.23, lead: 493.88, pad: 587.33 }, // F4, B4, D5
+                { bass: 329.63, lead: 440.00, pad: 523.25 }, // E4, A4, C5
+                { bass: 293.66, lead: 392.00, pad: 493.88 }  // D4, G4, B4
+            ]
+        ],
+        postPortal: [
+            // New pattern for post-portal: More energetic progression
+            [
+                { bass: 392.00, lead: 587.33, pad: 783.99 }, // G4, D5, G5
+                { bass: 440.00, lead: 659.25, pad: 880.00 }, // A4, E5, A5
+                { bass: 493.88, lead: 698.46, pad: 987.77 }, // B4, F5, B5
+                { bass: 523.25, lead: 783.99, pad: 1046.50 } // C5, G5, C6
+            ],
+            // New pattern: Descending with wider intervals
+            [
+                { bass: 523.25, lead: 783.99, pad: 1046.50 }, // C5, G5, C6
+                { bass: 493.88, lead: 698.46, pad: 987.77 },  // B4, F5, B5
+                { bass: 440.00, lead: 659.25, pad: 880.00 },  // A4, E5, A5
+                { bass: 392.00, lead: 587.33, pad: 783.99 }   // G4, D5, G5
+            ],
+            // New pattern: Alternating major/minor feel
+            [
+                { bass: 392.00, lead: 587.33, pad: 783.99 },  // G4, D5, G5
+                { bass: 349.23, lead: 523.25, pad: 698.46 },  // F4, C5, F5
+                { bass: 329.63, lead: 493.88, pad: 659.25 },  // E4, B4, E5
+                { bass: 293.66, lead: 440.00, pad: 587.33 }   // D4, A4, D5
+            ]
+        ]
+    };
+    
+    let currentPattern = 0;
+    let currentNote = 0;
+    const noteDuration = 0.8;
+    const selectedPatterns = patterns[patternType] || patterns.default;
+    
+    function playNextNote() {
+        const pattern = selectedPatterns[currentPattern];
+        const note = pattern[currentNote];
+        
+        bassOsc.frequency.setValueAtTime(note.bass, audioContext.currentTime);
+        leadOsc.frequency.setValueAtTime(note.lead, audioContext.currentTime);
+        padOsc.frequency.setValueAtTime(note.pad, audioContext.currentTime);
+        
+        currentNote = (currentNote + 1) % pattern.length;
+        if (currentNote === 0) {
+            currentPattern = (currentPattern + 1) % selectedPatterns.length;
+        }
+    }
+    
+    bassOsc.start();
+    leadOsc.start();
+    padOsc.start();
+    playNextNote();
+    
+    const interval = setInterval(playNextNote, noteDuration * 1000);
+    
+    isMusicPlaying = true;
+    backgroundMusic = { interval, masterGain, bassOsc, leadOsc, padOsc };
+}
+
+function stopBackgroundMusic() {
+    if (!isMusicPlaying) return;
+    
+    clearInterval(backgroundMusic.interval);
+    backgroundMusic.bassOsc.stop();
+    backgroundMusic.leadOsc.stop();
+    backgroundMusic.padOsc.stop();
+    backgroundMusic.masterGain.disconnect();
+    
+    isMusicPlaying = false;
+    backgroundMusic = null;
+}
+
 // --- Scene Setup ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x33334d);
@@ -93,6 +269,12 @@ const player = new THREE.Group();
 player.position.set(-5, 0, 0); // Start in Mito
 scene.add(player);
 
+// Add walking animation variables
+const walkCycleDuration = 0.5; // Duration of one complete walk cycle in seconds
+const maxLimbSwing = Math.PI / 6; // Maximum angle for limb swing (30 degrees)
+const maxArmSwing = Math.PI / 8; // Slightly less swing for arms
+let walkCycleTime = 0; // Track time for walk cycle
+
 // Humanoid Model Parts
 const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x0099ff, roughness: 0.6, metalness: 0.2 });
 const headHeight = 0.4; const bodyHeight = 0.8; const limbRadius = 0.1;
@@ -100,8 +282,21 @@ const armLength = 0.6; const legHeight = 0.7;
 const head = new THREE.Mesh(new THREE.SphereGeometry(headHeight / 2, 16, 12), bodyMaterial); head.position.y = legHeight + bodyHeight + headHeight / 2; head.castShadow = true; player.add(head);
 const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, bodyHeight, 0.3), bodyMaterial); body.position.y = legHeight + bodyHeight / 2; body.castShadow = true; player.add(body);
 const limbMaterial = new THREE.MeshStandardMaterial({ color: 0x0077cc, roughness: 0.7 });
-const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(limbRadius, limbRadius, armLength), limbMaterial); leftArm.position.set(-0.35, legHeight + bodyHeight * 0.7, 0); leftArm.rotation.z = Math.PI / 8; leftArm.castShadow = true; player.add(leftArm);
-const rightArm = leftArm.clone(); rightArm.position.x = 0.35; rightArm.rotation.z = -Math.PI / 8; player.add(rightArm);
+
+// Create arms in a basic hanging position at the sides
+const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(limbRadius, limbRadius, armLength), limbMaterial);
+leftArm.position.set(-0.35, legHeight + bodyHeight * 0.95, 0); // Raised Y position from 0.7 to 0.8
+// Set the pivot point to the top of the arm (shoulder)
+leftArm.geometry.translate(0, armLength/2, 0);
+// Rotate arms to hang down naturally
+leftArm.rotation.x = Math.PI;
+leftArm.castShadow = true;
+player.add(leftArm);
+
+const rightArm = leftArm.clone();
+rightArm.position.x = 0.35;
+player.add(rightArm);
+
 const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(limbRadius * 1.2, limbRadius * 1.1, legHeight), limbMaterial); leftLeg.position.set(-0.15, legHeight / 2, 0); leftLeg.castShadow = true; player.add(leftLeg);
 const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.15; player.add(rightLeg);
 const playerHeight = legHeight + bodyHeight + headHeight;
@@ -203,16 +398,16 @@ const ureaCycleQuest = {
         [QUEST_STATE.NOT_STARTED]: "Talk to Professor Hepaticus.",
         [QUEST_STATE.STEP_1_GATHER_MITO]: "First, gather NH3 (1), HCO3 (1), ATP (2) in Mitochondria.",
         [QUEST_STATE.STEP_2_MAKE_CARB_PHOS]: "Great! Now use the CPS1 Station to make Carbamoyl Phosphate.",
-        [QUEST_STATE.STEP_3_MEET_USHER]: "Find the Ornithine Usher to get some Ornithine.",
+        [QUEST_STATE.STEP_3_MEET_USHER]: "Collect the Carbamoyl Phosphate, and speak with the Ornithine Usher to get some Ornithine.",
         [QUEST_STATE.STEP_4_MAKE_CITRULLINE]: "Use OTC Station with Carbamoyl Phosphate and Ornithine to make Citrulline, then talk to the Ornithine Usher to gain passage.",
-        [QUEST_STATE.STEP_5A_OPEN_PORTAL]: "Permission granted! Use the ORN T1 Portal with Citrulline to activate it and transport to the Cytosol.",
+        [QUEST_STATE.STEP_5A_OPEN_PORTAL]: "Permission granted! Use the ORNT1 Portal with Citrulline to activate it and transport to the Cytosol.",
         [QUEST_STATE.STEP_6_GATHER_CYTO]: "In the Cytosol: Collect the transported Citrulline, plus Aspartate (1) and ATP (1).",
         [QUEST_STATE.STEP_7_MAKE_ARGSUCC]: "Use ASS Station to make Argininosuccinate.",
         [QUEST_STATE.STEP_8_CLEAVE_ARGSUCC]: "Use ASL Station to cleave Argininosuccinate into Arginine and Fumarate. Collect both.",
         [QUEST_STATE.STEP_8B_FURNACE_FUMARATE]: "Gather the Arginine and Fumarate. Then, feed the Fumarate to the Krebs Cycle Furnace.",
         [QUEST_STATE.STEP_9_MAKE_UREA]: "Use ARG1 Station with Arginine to make Urea and Ornithine.",
         [QUEST_STATE.STEP_9B_DISPOSE_UREA]: "Dispose of the toxic Urea in the Waste Receptacle.",
-        [QUEST_STATE.STEP_10_RIVER_CHALLENGE]: "Return to Professor Hepaticus and pass the Reality River challenge.",
+        [QUEST_STATE.STEP_10_RIVER_CHALLENGE]: "Return to Professor Hepaticus... she has a few questions for you.",
         [QUEST_STATE.COMPLETED]: "Quest complete! You've mastered the Urea Cycle!"
     }, rewards: { knowledgePoints: 100 }
 };
@@ -296,6 +491,23 @@ function createProfessorHepaticus(position) {
     const coatMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }); const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.7, 1.4, 8), coatMaterial); coat.position.y = 0.7; coat.castShadow = true; professorGroup.add(coat);
     const armMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 }); const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.8, 8), armMaterial); leftArm.position.set(-0.5, 0.8, 0); leftArm.rotation.z = Math.PI / 6; leftArm.castShadow = true; professorGroup.add(leftArm); const rightArm = leftArm.clone(); rightArm.position.x = 0.5; rightArm.rotation.z = -Math.PI / 6; professorGroup.add(rightArm);
     const glassesMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.3 }); const leftLens = new THREE.Mesh(new THREE.CircleGeometry(0.1, 16), glassesMaterial); leftLens.position.set(-0.1, 1.45, 0.25); leftLens.rotation.x = 0; professorGroup.add(leftLens); const rightLens = leftLens.clone(); rightLens.position.x = 0.1; professorGroup.add(rightLens);
+
+    // Add eyebrows
+    const eyebrowMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5 });
+    const eyebrowCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-0.05, 0, 0),
+        new THREE.Vector3(0, 0.02, 0),
+        new THREE.Vector3(0.05, 0, 0)
+    ]);
+    const eyebrowGeometry = new THREE.TubeGeometry(eyebrowCurve, 20, 0.01, 8, false);
+    const leftEyebrow = new THREE.Mesh(eyebrowGeometry, eyebrowMaterial);
+    leftEyebrow.position.set(-0.1, 1.5, 0.25);
+    professorGroup.add(leftEyebrow);
+    
+    const rightEyebrow = leftEyebrow.clone();
+    rightEyebrow.position.x = 0.1;
+    professorGroup.add(rightEyebrow);
+
     scene.add(professorGroup); professorGroup.userData = { type: 'npc', name: 'Professor Hepaticus', questId: 'ureaCycle' }; interactiveObjects.push(professorGroup); originalMaterials.set(professorGroup, coatMaterial.clone());
     const label = createTextSprite("Professor Hepaticus", { x: position.x, y: position.y, z: position.z }, { fontSize: 36, scale: 0.75 });
     scene.add(label);
@@ -341,8 +553,10 @@ originalMaterials.set(ornithineUsher, usherMaterial.clone());
 const usherLabel = createTextSprite("Ornithine Usher", { x: ornithineUsher.position.x, y: 2.2, z: ornithineUsher.position.z }, { fontSize: 36, scale: 0.75 });
 scene.add(usherLabel);
 
-createStation("CPS1", { x: -12, z: 0 }, 0xff0000, { requires: { 'NH3': 1, 'HCO3': 1, 'ATP': 2 }, produces: 'Carbamoyl Phosphate', productColors: { 'Carbamoyl Phosphate': carbPhosColor }, requiredQuestState: QUEST_STATE.STEP_2_MAKE_CARB_PHOS, advancesQuestTo: QUEST_STATE.STEP_3_MEET_USHER });
-createStation("OTC", { x: -8, z: 7 }, 0xff4500, { requires: { 'Carbamoyl Phosphate': 1, 'Ornithine': 1 }, produces: 'Citrulline', productColors: { 'Citrulline': citrullineColor }, requiredQuestState: QUEST_STATE.STEP_4_MAKE_CITRULLINE, advancesQuestTo: QUEST_STATE.STEP_4_MAKE_CITRULLINE }); // Moved up
+// Swapped positions: OTC now at -12, CPS1 at -8
+createStation("OTC", { x: -12, z: 0 }, 0xff4500, { requires: { 'Carbamoyl Phosphate': 1, 'Ornithine': 1 }, produces: 'Citrulline', productColors: { 'Citrulline': citrullineColor }, requiredQuestState: QUEST_STATE.STEP_4_MAKE_CITRULLINE, advancesQuestTo: QUEST_STATE.STEP_4_MAKE_CITRULLINE });
+createStation("CPS1", { x: -8, z: 7 }, 0xff0000, { requires: { 'NH3': 1, 'HCO3': 1, 'ATP': 2 }, produces: 'Carbamoyl Phosphate', productColors: { 'Carbamoyl Phosphate': carbPhosColor }, requiredQuestState: QUEST_STATE.STEP_2_MAKE_CARB_PHOS, advancesQuestTo: QUEST_STATE.STEP_3_MEET_USHER });
+
 createResource('NH3', { x: -13, z: 5 }, 0xffaaaa);
 createResource('ATP', { x: -10, z: 8 }, 0xffffaa);
 // ADDED: Second ATP resource in Mitochondria
@@ -360,15 +574,15 @@ const wasteBucket = createWasteBucket(new THREE.Vector3(13, 0, -8));
 // Position its center exactly on the dividing wall X, within Cytosol Z range
 const krebsFurnace = createKrebsFurnace(new THREE.Vector3(DIVIDING_WALL_X, 1, 8));
 
-// --- ORN T1 Portal (On dividing wall) ---
+// --- ORNT1 Portal (On dividing wall) ---
 const portalGeometry = new THREE.TorusGeometry(1.5, 0.3, 16, 50);
 const portalMaterial = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00aaaa, roughness: 0.4, metalness: 0.6, side: THREE.DoubleSide });
 const ornT1Portal = new THREE.Mesh(portalGeometry, portalMaterial);
 ornT1Portal.position.set(portalWallX + 0.05, wallHeight / 2 + 0.1, portalWallCenterZ);
 ornT1Portal.rotation.y = Math.PI / 2;
-ornT1Portal.userData = { type: 'portal', name: 'ORN T1 Portal', requiredQuestState: QUEST_STATE.STEP_5A_OPEN_PORTAL, requires: { 'Citrulline': 1 }, advancesQuestTo: QUEST_STATE.STEP_6_GATHER_CYTO, action: 'transportCitrulline', productColor: citrullineColor };
+ornT1Portal.userData = { type: 'portal', name: 'ORNT1 Portal', requiredQuestState: QUEST_STATE.STEP_5A_OPEN_PORTAL, requires: { 'Citrulline': 1 }, advancesQuestTo: QUEST_STATE.STEP_6_GATHER_CYTO, action: 'transportCitrulline', productColor: citrullineColor };
 scene.add(ornT1Portal); interactiveObjects.push(ornT1Portal); originalMaterials.set(ornT1Portal, portalMaterial.clone());
-const portalLabel = createTextSprite("ORN T1 Portal", { x: ornT1Portal.position.x, y: ornT1Portal.position.y + 2.0, z: ornT1Portal.position.z }, { fontSize: 36, scale: 0.75 });
+const portalLabel = createTextSprite("ORNT1 Portal", { x: ornT1Portal.position.x, y: ornT1Portal.position.y + 2.0, z: ornT1Portal.position.z }, { fontSize: 36, scale: 0.75 });
 scene.add(portalLabel);
 
 // Portal Barrier (On dividing wall)
@@ -450,9 +664,13 @@ function showFeedback(message, duration = 2500) {
         }
     }, duration);
 }
-function showInteractionPrompt(objectName) {
+function showInteractionPrompt(objectName, objectType) {
     if (interactionPrompt) {
-        interactionText.textContent = objectName;
+        let actionText = "Interact with";
+        if (objectType === 'resource') {
+            actionText = "Collect";
+        }
+        interactionText.textContent = `${actionText} ${objectName}`;
         interactionPrompt.classList.remove('hidden');
     }
 }
@@ -674,10 +892,14 @@ function interactWithObject(object) {
                  ]);
             }
         } else if (!currentQuest) {
-             // Offer the quest if not started
+             // Start background music when accepting the quest
              showDialogue("The cell is overwhelmed with ammonia! We need to convert it to Urea. Can you help?", [
-                 { text: "Accept Quest", action: () => { startQuest(ureaCycleQuest); isUserInteracting = false; } }, // Start quest and close dialogue
-                 { text: "Decline", action: () => { isUserInteracting = false; } } // Just close dialogue
+                 { text: "Accept Quest", action: () => { 
+                     startQuest(ureaCycleQuest); 
+                     startBackgroundMusic(); // Start music when accepting quest
+                     isUserInteracting = false; 
+                 }},
+                 { text: "Decline", action: () => { isUserInteracting = false; } }
              ]);
         } else {
             // Fallback if interacted with but no specific state matches (shouldn't happen often)
@@ -716,7 +938,7 @@ function interactWithObject(object) {
                     hasPortalPermission = true;
                     showFeedback("Portal permission granted!");
                     advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_5A_OPEN_PORTAL);
-                    showDialogue("Excellent! You've made Citrulline. I have granted you passage through the ORN T1 portal. You must activate it yourself using your Citrulline.", [
+                    showDialogue("Excellent! You've made Citrulline. I have granted you passage through the ORNT1 portal. You must activate it yourself using your Citrulline.", [
                         { text: "Understood.", action: () => { isUserInteracting = false; } }
                     ]);
                 } else {
@@ -725,7 +947,7 @@ function interactWithObject(object) {
                     ]);
                 }
             } else if (currentQuest.state === QUEST_STATE.STEP_5A_OPEN_PORTAL) {
-                showDialogue("You have permission. Use the ORN T1 Portal with your Citrulline...", [
+                showDialogue("You have permission. Use the ORNT1 Portal with your Citrulline...", [
                     { text: "Will do!", action: () => { isUserInteracting = false; } }
                 ]);
             } else if (cytosolStates.includes(currentQuest.state)) {
@@ -741,7 +963,7 @@ function interactWithObject(object) {
             }
         } else {
             // Default dialogue if quest not active
-            showDialogue("Greetings! I manage the ORN T1 antiport.", [
+            showDialogue("Greetings! I manage the ORNT1 antiport.", [
                 { text: "Interesting.", action: () => { isUserInteracting = false; } }
             ]);
         }
@@ -749,6 +971,14 @@ function interactWithObject(object) {
 
     // --- Resource Interaction ---
     else if (userData.type === 'resource') {
+        // Check if this is an initial resource that requires quest to be started
+        const initialResources = ['NH3', 'HCO3', 'ATP'];
+        if (initialResources.includes(userData.name) && (!currentQuest || currentQuest.state === QUEST_STATE.NOT_STARTED)) {
+            showFeedback("You should talk to Professor Hepaticus first.");
+            return;
+        }
+
+        createGameBoySound('collect');
         addToInventory(userData.name, 1);
         showFeedback(`Collected ${userData.name}`);
 
@@ -766,7 +996,6 @@ function interactWithObject(object) {
                 // Provide feedback upon collecting Arginine/Fumarate
                 if (hasItems({'Arginine': 1}) && hasItems({'Fumarate': 1})) {
                     showFeedback("Arginine and Fumarate collected!");
-                    // Note: Quest advances to STEP_8B via ASL station, not collection.
                 } else if (hasItems({'Arginine': 1})) {
                      showFeedback("Arginine collected. Still need Fumarate.");
                 } else if (hasItems({'Fumarate': 1})) {
@@ -779,15 +1008,14 @@ function interactWithObject(object) {
         scene.remove(userData.object3D);
         const i_obj = interactiveObjects.indexOf(object); if (i_obj > -1) interactiveObjects.splice(i_obj, 1);
         const m_mesh = resourceMeshes.indexOf(object); if (m_mesh > -1) resourceMeshes.splice(m_mesh, 1);
-        originalMaterials.delete(object); // Clean up original material map
+        originalMaterials.delete(object);
 
         // If the collected object was the closest one, clear the prompt
         if (closestInteractiveObject === object) {
             closestInteractiveObject = null;
-            lastClosestObject = null; // Prevent potential unhighlight flicker
+            lastClosestObject = null;
             hideInteractionPrompt();
         }
-        // No need to set isUserInteracting as collecting is instant
     }
 
     // --- Station Interaction ---
@@ -868,7 +1096,7 @@ function interactWithObject(object) {
     }
 
     // --- Portal Interaction ---
-    else if (userData.type === 'portal' && userData.name === 'ORN T1 Portal') {
+    else if (userData.type === 'portal' && userData.name === 'ORNT1 Portal') {
         if (!currentQuest || currentQuest.id !== 'ureaCycle') { showFeedback("Quest not active."); return; }
         if (currentQuest.state !== QUEST_STATE.STEP_5A_OPEN_PORTAL) { showFeedback(`Portal cannot be used yet.`); return; }
         if (!hasPortalPermission) { showFeedback("You don't have permission to activate this portal yet. Talk to the Usher."); return; }
@@ -880,32 +1108,40 @@ function interactWithObject(object) {
              showFeedback("Error using portal!", 2000); return;
         }
 
-        showFeedback("Activating ORN T1 Portal...");
-        removePortalBarrier(); // Remove the visual/collision barrier
+        showFeedback("Activating ORNT1 Portal...");
+        
+        // Stop background music before playing celebration
+        if (isMusicPlaying) {
+            stopBackgroundMusic();
+        }
+        
+        // Play celebratory music
+        playPortalCelebration();
+        
+        // Remove the visual/collision barrier
+        removePortalBarrier();
 
         // Optional: Visual effect for portal activation
         const portalMesh = object;
         if (originalMaterials.has(portalMesh)) {
             const originalMat = originalMaterials.get(portalMesh);
-            if (originalMat && originalMat.emissive) { // Check if material has emissive property
-                const originalEmissive = originalMat.emissive.getHex(); // Store original color
-                portalMesh.material.emissive.setHex(0xffffff); // Flash white
+            if (originalMat && originalMat.emissive) {
+                const originalEmissive = originalMat.emissive.getHex();
+                portalMesh.material.emissive.setHex(0xffffff);
                 setTimeout(() => {
-                    // Restore original emissive color after flash
-                    if (portalMesh?.material && originalMaterials.has(portalMesh)) { // Check again if mesh/material still exist
+                    if (portalMesh?.material && originalMaterials.has(portalMesh)) {
                         const currentOriginalMat = originalMaterials.get(portalMesh);
                         if(currentOriginalMat?.emissive) {
                             portalMesh.material.emissive.setHex(currentOriginalMat.emissive.getHex());
                         }
                     }
-                }, 200); // Flash duration
+                }, 200);
             }
         }
 
         // Spawn transported Citrulline on the CYTOSOL side
-        const spawnPosition = { x: portalMesh.position.x + 1.5, z: portalMesh.position.z }; // Offset slightly into cytosol
+        const spawnPosition = { x: portalMesh.position.x + 1.5, z: portalMesh.position.z };
         const spawnColor = userData.productColor || citrullineColor;
-        // Clamp spawn position to be safely within bounds
         spawnPosition.x = THREE.MathUtils.clamp(spawnPosition.x, MIN_X + 0.5, MAX_X - 0.5);
         spawnPosition.z = THREE.MathUtils.clamp(spawnPosition.z, MIN_Z + 0.5, MAX_Z - 0.5);
         createResource('Citrulline', spawnPosition, spawnColor, {initialY: 0.6});
@@ -915,10 +1151,8 @@ function interactWithObject(object) {
         if (userData.advancesQuestTo === QUEST_STATE.STEP_6_GATHER_CYTO) {
              advanceQuest(ureaCycleQuest, QUEST_STATE.STEP_6_GATHER_CYTO);
         } else {
-             // Log warning if quest state mismatch
              console.warn(`Portal advancement state mismatch! Expected ${QUEST_STATE.STEP_6_GATHER_CYTO}, but got ${userData.advancesQuestTo}`);
         }
-        // Portal interaction is instant
     }
 
     // --- Waste Bucket Interaction ---
@@ -1088,6 +1322,11 @@ function unhighlightObject(object) {
     }
 }
 
+// Add NPC animation variables
+const professorSwaySpeed = 0.5;
+const professorArmSwingSpeed = 1.2;
+const usherFloatSpeed = 1.0;
+const usherFloatAmount = 0.1;
 
 function animate() {
     requestAnimationFrame(animate); // Loop the animation
@@ -1107,7 +1346,34 @@ function animate() {
     moveDirection.set(0, 0, 0); // Reset move direction
     const playerIsMoving = moveX !== 0 || moveZ !== 0;
 
+    // Update walk cycle time
     if (playerIsMoving) {
+        walkCycleTime += delta;
+        if (walkCycleTime > walkCycleDuration) {
+            walkCycleTime -= walkCycleDuration;
+        }
+    } else {
+        walkCycleTime = 0;
+        // Reset limbs to neutral position
+        leftArm.rotation.x = Math.PI;
+        rightArm.rotation.x = Math.PI;
+        leftLeg.rotation.x = 0;
+        rightLeg.rotation.x = 0;
+    }
+
+    if (playerIsMoving) {
+        // Calculate limb swing angles
+        const swingPhase = (walkCycleTime / walkCycleDuration) * Math.PI * 2;
+        const armSwing = Math.sin(swingPhase) * maxArmSwing;
+        const legSwing = Math.sin(swingPhase) * maxLimbSwing;
+
+        // Apply swinging motion to limbs
+        // Arms swing forward/backward from their hanging position
+        leftArm.rotation.x = Math.PI + armSwing;
+        rightArm.rotation.x = Math.PI - armSwing;
+        leftLeg.rotation.x = legSwing;
+        rightLeg.rotation.x = -legSwing;
+
         // Get camera direction (ignore Y component for ground movement)
         camera.getWorldDirection(cameraForward);
         cameraForward.y = 0;
@@ -1197,7 +1463,7 @@ function animate() {
             }
             if (foundClosest) {
                 highlightObject(foundClosest); // Highlight the new one
-                showInteractionPrompt(foundClosest.userData.name || 'Object'); // Show prompt
+                showInteractionPrompt(foundClosest.userData.name || 'Object', foundClosest.userData.type); // Show prompt
             } else {
                 hideInteractionPrompt(); // Hide prompt if no object is close
             }
@@ -1246,6 +1512,42 @@ function animate() {
     }
     controls.update(delta); // Update OrbitControls (handles damping)
 
+    // Animate Professor Hepaticus
+    if (professorHepaticus && professorHepaticus.parent === scene) {
+        // Gentle body sway
+        professorHepaticus.rotation.y = Math.sin(elapsedTime * professorSwaySpeed) * 0.1;
+        
+        // Arm movement
+        const leftArm = professorHepaticus.children[3];
+        const rightArm = professorHepaticus.children[4];
+        if (leftArm && rightArm) {
+            leftArm.rotation.z = Math.PI / 6 + Math.sin(elapsedTime * professorArmSwingSpeed) * 0.2;
+            rightArm.rotation.z = -Math.PI / 6 - Math.sin(elapsedTime * professorArmSwingSpeed) * 0.2;
+        }
+
+        // Eyebrow movement
+        const leftEyebrow = professorHepaticus.children[6];
+        const rightEyebrow = professorHepaticus.children[7];
+        if (leftEyebrow && rightEyebrow) {
+            // Eyebrows move up and down slightly
+            const eyebrowOffset = Math.sin(elapsedTime * 0.8) * 0.02;
+            leftEyebrow.position.y = 1.5 + eyebrowOffset;
+            rightEyebrow.position.y = 1.5 + eyebrowOffset;
+            
+            // Slight rotation for expression
+            leftEyebrow.rotation.z = Math.sin(elapsedTime * 0.5) * 0.1;
+            rightEyebrow.rotation.z = -Math.sin(elapsedTime * 0.5) * 0.1;
+        }
+    }
+
+    // Animate Ornithine Usher
+    if (ornithineUsher && ornithineUsher.parent === scene) {
+        // Gentle floating motion
+        ornithineUsher.position.y = 0.7 + Math.sin(elapsedTime * usherFloatSpeed) * usherFloatAmount;
+        // Slight rotation
+        ornithineUsher.rotation.y = Math.sin(elapsedTime * 0.5) * 0.2;
+    }
+
     // 8. Render the Scene
     renderer.render(scene, camera);
 }
@@ -1267,3 +1569,76 @@ loadingScreen.classList.add('hidden'); // Hide loading screen
 animate(); // Start the animation loop
 
 console.log("Metabolon RPG Initialized (v25 - Added ATP, Restored Mito Walls, Embedded Furnace).");
+
+// Add new celebratory sound function
+function playPortalCelebration() {
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+
+    const masterGain = audioContext.createGain();
+    masterGain.gain.value = 0.1;
+    masterGain.connect(audioContext.destination);
+
+    // Create multiple oscillators for rich sound
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    const osc3 = audioContext.createOscillator();
+
+    osc1.type = 'sine';
+    osc2.type = 'sine';
+    osc3.type = 'sine';
+
+    const gain1 = audioContext.createGain();
+    const gain2 = audioContext.createGain();
+    const gain3 = audioContext.createGain();
+
+    osc1.connect(gain1);
+    osc2.connect(gain2);
+    osc3.connect(gain3);
+    gain1.connect(masterGain);
+    gain2.connect(masterGain);
+    gain3.connect(masterGain);
+
+    // Triumphant ascending arpeggio
+    const notes = [
+        { f1: 523.25, f2: 659.25, f3: 783.99 }, // C5, E5, G5
+        { f1: 587.33, f2: 698.46, f3: 880.00 }, // D5, F5, A5
+        { f1: 659.25, f2: 783.99, f3: 987.77 }, // E5, G5, B5
+        { f1: 698.46, f2: 880.00, f3: 1046.50 }, // F5, A5, C6
+        { f1: 783.99, f2: 987.77, f3: 1174.66 }, // G5, B5, D6
+        { f1: 880.00, f2: 1046.50, f3: 1318.51 }  // A5, C6, E6
+    ];
+
+    let currentNote = 0;
+    const noteDuration = 0.15; // Fast arpeggio
+
+    function playNextNote() {
+        if (currentNote >= notes.length) {
+            // Clean up
+            osc1.stop();
+            osc2.stop();
+            osc3.stop();
+            masterGain.disconnect();
+            
+            // Start new background music pattern after celebration
+            setTimeout(() => {
+                startBackgroundMusic('postPortal'); // Pass a flag to use different pattern
+            }, 500); // Short delay before starting new music
+            return;
+        }
+
+        const note = notes[currentNote];
+        osc1.frequency.setValueAtTime(note.f1, audioContext.currentTime);
+        osc2.frequency.setValueAtTime(note.f2, audioContext.currentTime);
+        osc3.frequency.setValueAtTime(note.f3, audioContext.currentTime);
+
+        currentNote++;
+        setTimeout(playNextNote, noteDuration * 1000);
+    }
+
+    osc1.start();
+    osc2.start();
+    osc3.start();
+    playNextNote();
+}
